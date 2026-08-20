@@ -13,12 +13,13 @@
     },
     {
       "name": "windows",
-      "displayName": "Windows x64 (MSVC)",
+      "displayName": "Windows x64 (MSVC, Ninja)",
+      "description": "Run from a Developer PowerShell/Command Prompt for Visual Studio so cl.exe, INCLUDE and LIB are already set up; Ninja does not locate the MSVC toolset itself.",
       "inherits": "base",
-      "generator": "Visual Studio 18 2026",
-      "architecture": "x64",
+      "generator": "Ninja",
       "cacheVariables": {
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "CMAKE_BUILD_TYPE": "Debug"
       },
       "condition": {
         "type": "equals",
@@ -44,8 +45,7 @@
   "buildPresets": [
     {
       "name": "windows",
-      "configurePreset": "windows",
-      "configuration": "Debug"
+      "configurePreset": "windows"
     },
     {
       "name": "linux",
@@ -55,8 +55,7 @@
   "testPresets": [
     {
       "name": "windows",
-      "configurePreset": "windows",
-      "configuration": "Debug"
+      "configurePreset": "windows"
     },
     {
       "name": "linux",
