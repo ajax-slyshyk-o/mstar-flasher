@@ -48,6 +48,7 @@ if(MSTAR_ENABLE_FTDI)
         PRIVATE FTD2XX::FTD2XX LibMPSSE::LibMPSSE
     )
     target_link_libraries(mstar-cli PRIVATE mstar-ftdi)
+    target_compile_definitions(mstar-cli PRIVATE MSTAR_ENABLE_FTDI)
 
     add_custom_command(TARGET mstar-cli POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

@@ -11,6 +11,8 @@ struct ProgrammerInfo {
     std::string description;
     std::string serial;
     std::string location;     // e.g. MPSSE channel
+    bool inUse = false;       // held open by another process/driver;
+                               // description/serial may be incomplete
 };
 
 /// Criteria for selecting a specific programmer among several enumerated

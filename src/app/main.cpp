@@ -3,11 +3,40 @@
 
 #include <CLI/CLI.hpp>
 
+#ifdef MSTAR_ENABLE_FTDI
+#include "mstar/transport/ftdi/ftdi_i2c.hpp"
+#endif
+
 namespace {
 
 int runList() {
+#ifdef MSTAR_ENABLE_FTDI
+    auto devices = mstar::ftdi::FtdiI2c::enumerate();
+    if (!devices) {
+        std::cerr << "Failed to enumerate FTDI devices: " << devices.error().message << "\n";
+        return 1;
+    }
+    if (devices->empty()) {
+        std::cout << "No FTDI programmer devices found.\n";
+        return 0;
+    }
+    for (const auto& dev : *devices) {
+        std::cout << "Programmer:\n"
+                   << "  FTDI device: " << dev.kind << "\n"
+                   << "  Description: " << dev.description << "\n"
+                   << "  Serial: " << dev.serial << "\n"
+                   << "  Channel: " << (dev.location.empty() ? "-" : dev.location) << "\n";
+        if (dev.inUse) {
+            std::cout << "  Note: held open by another process/driver "
+                          "(fields above may be incomplete)\n";
+        }
+        std::cout << "\n";
+    }
+    return 0;
+#else
     std::cout << "No programmer backends are enabled in this build.\n";
     return 0;
+#endif
 }
 
 int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz) {
