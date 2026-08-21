@@ -50,12 +50,16 @@ if(MSTAR_ENABLE_FTDI)
     target_link_libraries(mstar-cli PRIVATE mstar-ftdi)
     target_compile_definitions(mstar-cli PRIVATE MSTAR_ENABLE_FTDI)
 
-    add_custom_command(TARGET mstar-cli POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_RUNTIME_DLLS:mstar-cli>"
-            "$<TARGET_FILE_DIR:mstar-cli>"
-        COMMAND_EXPAND_LISTS
-    )
+    if(WIN32)
+        # $<TARGET_RUNTIME_DLLS:...> is only meaningful on DLL platforms;
+        # ELF platforms resolve shared libs via RPATH instead.
+        add_custom_command(TARGET mstar-cli POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_RUNTIME_DLLS:mstar-cli>"
+                "$<TARGET_FILE_DIR:mstar-cli>"
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endif()
 
 if(MSTAR_ENABLE_CH341)

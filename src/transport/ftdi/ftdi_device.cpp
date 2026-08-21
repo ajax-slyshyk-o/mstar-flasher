@@ -27,9 +27,8 @@ std::string_view deviceTypeName(FT_DEVICE type) {
     }
 }
 
-// FTDI appends a channel letter (A, B, ...) to the serial number of
-// multi-port devices such as the FT2232D (documented in ftd2xx.h's EEPROM
-// programming notes), so it doubles as a channel identifier here.
+} // namespace
+
 std::string channelFromSerial(std::string_view serial) {
     if (serial.empty()) {
         return {};
@@ -41,13 +40,9 @@ std::string channelFromSerial(std::string_view serial) {
     return {};
 }
 
-// SerialNumber/Description are fixed-size buffers that are not guaranteed
-// to be NUL-terminated when the EEPROM content is at capacity.
 std::string boundedString(const char* data, std::size_t capacity) {
     return std::string(data, strnlen(data, capacity));
 }
-
-} // namespace
 
 Result<std::vector<ProgrammerInfo>> enumerateDevices() {
     DWORD numDevices = 0;
