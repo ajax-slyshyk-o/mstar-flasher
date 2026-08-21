@@ -13,6 +13,8 @@ struct ProgrammerInfo {
     std::string location;     // e.g. MPSSE channel
     bool inUse = false;       // held open by another process/driver;
                                // description/serial may be incomplete
+    std::optional<int> comPort; // Windows VCP COM port bound to this channel,
+                                 // if any; always nullopt on other platforms
 };
 
 /// Criteria for selecting a specific programmer among several enumerated

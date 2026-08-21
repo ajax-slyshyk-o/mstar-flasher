@@ -42,6 +42,9 @@ int runList() {
                    << "  Description: " << dev.description << "\n"
                    << "  Serial: " << dev.serial << "\n"
                    << "  Channel: " << (dev.location.empty() ? "-" : dev.location) << "\n";
+        if (dev.comPort) {
+            std::cout << "  COM port: COM" << *dev.comPort << "\n";
+        }
         if (dev.inUse) {
             std::cout << "  Note: held open by another process/driver "
                           "(fields above may be incomplete)\n";

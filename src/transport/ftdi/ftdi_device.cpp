@@ -3,6 +3,7 @@
 #include "ftdi_device.hpp"
 
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -26,6 +27,34 @@ std::string_view deviceTypeName(FT_DEVICE type) {
         default: return "unknown FTDI device";
     }
 }
+
+#ifdef _WIN32
+// FT_GetComPortNumber is a Windows-only D2XX call: only the Windows CDM
+// driver installs the D2XX and VCP drivers side by side on the same
+// channel. It needs a plain (non-MPSSE) handle, so this briefly opens and
+// closes the device purely to read the association back.
+std::optional<int> queryComPort(DWORD index, bool inUse) {
+    if (inUse) {
+        // Another process/driver already holds this channel; FT_Open would
+        // just fail, so don't bother trying.
+        return std::nullopt;
+    }
+
+    FT_HANDLE handle = nullptr;
+    if (FT_Open(static_cast<int>(index), &handle) != FT_OK) {
+        return std::nullopt;
+    }
+
+    LONG comPort = -1;
+    FT_STATUS status = FT_GetComPortNumber(handle, &comPort);
+    FT_Close(handle);
+
+    if (status != FT_OK || comPort < 0) {
+        return std::nullopt;
+    }
+    return static_cast<int>(comPort);
+}
+#endif
 
 } // namespace
 
@@ -68,13 +97,20 @@ Result<std::vector<ProgrammerInfo>> enumerateDevices() {
     for (DWORD i = 0; i < numDevices; ++i) {
         const auto& node = nodes[i];
         std::string serial = boundedString(node.SerialNumber, sizeof(node.SerialNumber));
+        bool inUse = (node.Flags & FT_FLAGS_OPENED) != 0;
+
+        std::optional<int> comPort;
+#ifdef _WIN32
+        comPort = queryComPort(i, inUse);
+#endif
 
         devices.push_back(ProgrammerInfo{
             .kind = std::string(deviceTypeName(static_cast<FT_DEVICE>(node.Type))),
             .description = boundedString(node.Description, sizeof(node.Description)),
             .serial = serial,
             .location = channelFromSerial(serial),
-            .inUse = (node.Flags & FT_FLAGS_OPENED) != 0,
+            .inUse = inUse,
+            .comPort = comPort,
         });
     }
 
