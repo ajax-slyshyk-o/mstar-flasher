@@ -1,9 +1,9 @@
 #include <array>
 #include <cstdint>
-#include <iomanip>
-#include <iostream>
+#include <cstdio>
+#include <format>
+#include <print>
 #include <span>
-#include <sstream>
 
 #include <CLI/CLI.hpp>
 
@@ -16,44 +16,43 @@
 namespace {
 
 std::string hexBytes(std::span<const uint8_t> bytes) {
-    std::ostringstream oss;
+    std::string result;
     for (size_t i = 0; i < bytes.size(); ++i) {
-        if (i != 0) oss << ' ';
-        oss << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-            << static_cast<unsigned>(bytes[i]);
+        if (i != 0) result += ' ';
+        result += std::format("{:02X}", bytes[i]);
     }
-    return oss.str();
+    return result;
 }
 
 int runList() {
 #ifdef MSTAR_ENABLE_FTDI
     auto devices = mstar::ftdi::FtdiI2c::enumerate();
     if (!devices) {
-        std::cerr << "Failed to enumerate FTDI devices: " << devices.error().message << "\n";
+        std::println(stderr, "Failed to enumerate FTDI devices: {}", devices.error().message);
         return 1;
     }
     if (devices->empty()) {
-        std::cout << "No FTDI programmer devices found.\n";
+        std::println("No FTDI programmer devices found.");
         return 0;
     }
     for (const auto& dev : *devices) {
-        std::cout << "Programmer:\n"
-                   << "  FTDI device: " << dev.kind << "\n"
-                   << "  Description: " << dev.description << "\n"
-                   << "  Serial: " << dev.serial << "\n"
-                   << "  Channel: " << (dev.location.empty() ? "-" : dev.location) << "\n";
+        std::println("Programmer:");
+        std::println("  FTDI device: {}", dev.kind);
+        std::println("  Description: {}", dev.description);
+        std::println("  Serial: {}", dev.serial);
+        std::println("  Channel: {}", dev.location.empty() ? "-" : dev.location);
         if (dev.comPort) {
-            std::cout << "  COM port: COM" << *dev.comPort << "\n";
+            std::println("  COM port: COM{}", *dev.comPort);
         }
         if (dev.inUse) {
-            std::cout << "  Note: held open by another process/driver "
-                          "(fields above may be incomplete)\n";
+            std::println(
+                "  Note: held open by another process/driver (fields above may be incomplete)");
         }
-        std::cout << "\n";
+        std::println();
     }
     return 0;
 #else
-    std::cout << "No programmer backends are enabled in this build.\n";
+    std::println("No programmer backends are enabled in this build.");
     return 0;
 #endif
 }
@@ -67,26 +66,26 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
 
     auto i2c = mstar::ftdi::FtdiI2c::open(selector);
     if (!i2c) {
-        std::cerr << "Failed to open FTDI I2C channel: " << i2c.error().message << "\n";
+        std::println(stderr, "Failed to open FTDI I2C channel: {}", i2c.error().message);
         return 1;
     }
 
     if (auto result = i2c->setClock(i2cClockHz); !result) {
-        std::cerr << "Failed to set I2C clock: " << result.error().message << "\n";
+        std::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
 
-    std::cout << "Target:\n"
-               << "  MStar ISP address: 0x" << std::hex << static_cast<unsigned>(ispAddress)
-               << std::dec << "\n";
+    std::println("Target:");
+    std::println("  MStar ISP address: {:#x}", ispAddress);
 
     mstar::MstarIsp isp(*i2c, ispAddress);
 
     if (auto result = isp.enter(); !result) {
-        std::cout << "  ISP activation: FAILED (" << result.error().message << ")\n";
+        std::println("  ISP activation: FAILED ({})", result.error().message);
         return 1;
     }
-    std::cout << "  ISP activation: OK\n\n";
+    std::println("  ISP activation: OK");
+    std::println();
 
     std::array<uint8_t, 1> readJedecId{0x9F};
     std::array<uint8_t, 3> jedecId{};
@@ -96,23 +95,23 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
     // ID read below succeeded. probe must never leave the target stuck in
     // a debug state.
     if (auto leaveResult = isp.leave(); !leaveResult) {
-        std::cerr << "Warning: failed to leave MStar ISP mode: " << leaveResult.error().message
-                   << "\n";
+        std::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
+                      leaveResult.error().message);
     }
 
     if (!result) {
-        std::cerr << "Failed to read flash JEDEC ID: " << result.error().message << "\n";
+        std::println(stderr, "Failed to read flash JEDEC ID: {}", result.error().message);
         return 1;
     }
 
-    std::cout << "Flash:\n"
-               << "  JEDEC ID: " << hexBytes(jedecId) << "\n";
+    std::println("Flash:");
+    std::println("  JEDEC ID: {}", hexBytes(jedecId));
     return 0;
 #else
     (void)serial;
     (void)ispAddress;
     (void)i2cClockHz;
-    std::cout << "No programmer backends are enabled in this build.\n";
+    std::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
 }
@@ -129,33 +128,32 @@ int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockH
 
     auto i2c = mstar::ftdi::FtdiI2c::open(selector);
     if (!i2c) {
-        std::cerr << "Failed to open FTDI I2C channel: " << i2c.error().message << "\n";
+        std::println(stderr, "Failed to open FTDI I2C channel: {}", i2c.error().message);
         return 1;
     }
 
     if (auto result = i2c->setClock(i2cClockHz); !result) {
-        std::cerr << "Failed to set I2C clock: " << result.error().message << "\n";
+        std::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
 
-    std::cout << "Probing I2C address 0x" << std::hex << static_cast<unsigned>(i2cAddress)
-               << std::dec << " at " << i2cClockHz << " Hz...\n"
-               << "Expect on a logic analyzer: START, address+W, ACK/NACK, STOP.\n";
+    std::println("Probing I2C address {:#x} at {} Hz...", i2cAddress, i2cClockHz);
+    std::println("Expect on a logic analyzer: START, address+W, ACK/NACK, STOP.");
 
     std::array<uint8_t, 1> probeByte{0x00};
     auto result = i2c->write(i2cAddress, probeByte);
     if (!result) {
-        std::cout << "No ACK (" << result.error().message << ")\n";
+        std::println("No ACK ({})", result.error().message);
         return 1;
     }
 
-    std::cout << "ACK received.\n";
+    std::println("ACK received.");
     return 0;
 #else
     (void)serial;
     (void)i2cAddress;
     (void)i2cClockHz;
-    std::cout << "No programmer backends are enabled in this build.\n";
+    std::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
 }
