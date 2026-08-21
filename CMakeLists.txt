@@ -11,12 +11,15 @@ if(MSVC)
 endif()
 
 option(MSTAR_BUILD_TESTS "Build unit tests" ON)
-option(MSTAR_ENABLE_FTDI "Enable FTDI programmer backend" OFF)
+option(MSTAR_ENABLE_FTDI "Enable FTDI programmer backend" ON)
 option(MSTAR_ENABLE_CH341 "Enable CH341 backend" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(CLI11 CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # mstar-core: hardware-independent MStar ISP / SPI bus / flash logic.
 # Must never link against D2XX, LibMPSSE or libusb.
@@ -25,6 +28,7 @@ add_library(mstar-core
 )
 target_include_directories(mstar-core PUBLIC include)
 target_compile_features(mstar-core PUBLIC cxx_std_23)
+target_link_libraries(mstar-core PUBLIC spdlog::spdlog fmt::fmt nlohmann_json::nlohmann_json)
 
 add_executable(mstar-cli src/app/main.cpp)
 target_link_libraries(mstar-cli PRIVATE mstar-core CLI11::CLI11)
@@ -44,6 +48,13 @@ if(MSTAR_ENABLE_FTDI)
         PRIVATE FTD2XX::FTD2XX LibMPSSE::LibMPSSE
     )
     target_link_libraries(mstar-cli PRIVATE mstar-ftdi)
+
+    add_custom_command(TARGET mstar-cli POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_RUNTIME_DLLS:mstar-cli>"
+            "$<TARGET_FILE_DIR:mstar-cli>"
+        COMMAND_EXPAND_LISTS
+    )
 endif()
 
 if(MSTAR_ENABLE_CH341)

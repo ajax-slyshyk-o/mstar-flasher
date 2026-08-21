@@ -4,6 +4,9 @@
   "builtin-baseline": "45f9f39362a4c52e2b1fbe57b7e649db7f3d96d4",
   "dependencies": [
     "cli11",
-    "catch2"
+    "catch2",
+    "fmt",
+    "spdlog",
+    "nlohmann-json"
   ]
 }
