@@ -1,11 +1,10 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
-#include <format>
-#include <print>
 #include <span>
 
 #include <CLI/CLI.hpp>
+#include <fmt/format.h>
 
 #include "mstar/isp/mstar_isp.hpp"
 
@@ -19,7 +18,7 @@ std::string hexBytes(std::span<const uint8_t> bytes) {
     std::string result;
     for (size_t i = 0; i < bytes.size(); ++i) {
         if (i != 0) result += ' ';
-        result += std::format("{:02X}", bytes[i]);
+        result += fmt::format("{:02X}", bytes[i]);
     }
     return result;
 }
@@ -28,31 +27,31 @@ int runList() {
 #ifdef MSTAR_ENABLE_FTDI
     auto devices = mstar::ftdi::FtdiI2c::enumerate();
     if (!devices) {
-        std::println(stderr, "Failed to enumerate FTDI devices: {}", devices.error().message);
+        fmt::println(stderr, "Failed to enumerate FTDI devices: {}", devices.error().message);
         return 1;
     }
     if (devices->empty()) {
-        std::println("No FTDI programmer devices found.");
+        fmt::println("No FTDI programmer devices found.");
         return 0;
     }
     for (const auto& dev : *devices) {
-        std::println("Programmer:");
-        std::println("  FTDI device: {}", dev.kind);
-        std::println("  Description: {}", dev.description);
-        std::println("  Serial: {}", dev.serial);
-        std::println("  Channel: {}", dev.location.empty() ? "-" : dev.location);
+        fmt::println("Programmer:");
+        fmt::println("  FTDI device: {}", dev.kind);
+        fmt::println("  Description: {}", dev.description);
+        fmt::println("  Serial: {}", dev.serial);
+        fmt::println("  Channel: {}", dev.location.empty() ? "-" : dev.location);
         if (dev.comPort) {
-            std::println("  COM port: COM{}", *dev.comPort);
+            fmt::println("  COM port: COM{}", *dev.comPort);
         }
         if (dev.inUse) {
-            std::println(
+            fmt::println(
                 "  Note: held open by another process/driver (fields above may be incomplete)");
         }
-        std::println();
+        fmt::println("");
     }
     return 0;
 #else
-    std::println("No programmer backends are enabled in this build.");
+    fmt::println("No programmer backends are enabled in this build.");
     return 0;
 #endif
 }
@@ -66,26 +65,26 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
 
     auto i2c = mstar::ftdi::FtdiI2c::open(selector);
     if (!i2c) {
-        std::println(stderr, "Failed to open FTDI I2C channel: {}", i2c.error().message);
+        fmt::println(stderr, "Failed to open FTDI I2C channel: {}", i2c.error().message);
         return 1;
     }
 
     if (auto result = i2c->setClock(i2cClockHz); !result) {
-        std::println(stderr, "Failed to set I2C clock: {}", result.error().message);
+        fmt::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
 
-    std::println("Target:");
-    std::println("  MStar ISP address: {:#x}", ispAddress);
+    fmt::println("Target:");
+    fmt::println("  MStar ISP address: {:#x}", ispAddress);
 
     mstar::MstarIsp isp(*i2c, ispAddress);
 
     if (auto result = isp.enter(); !result) {
-        std::println("  ISP activation: FAILED ({})", result.error().message);
+        fmt::println("  ISP activation: FAILED ({})", result.error().message);
         return 1;
     }
-    std::println("  ISP activation: OK");
-    std::println();
+    fmt::println("  ISP activation: OK");
+    fmt::println("");
 
     std::array<uint8_t, 1> readJedecId{0x9F};
     std::array<uint8_t, 3> jedecId{};
@@ -95,23 +94,23 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
     // ID read below succeeded. probe must never leave the target stuck in
     // a debug state.
     if (auto leaveResult = isp.leave(); !leaveResult) {
-        std::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
+        fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
                       leaveResult.error().message);
     }
 
     if (!result) {
-        std::println(stderr, "Failed to read flash JEDEC ID: {}", result.error().message);
+        fmt::println(stderr, "Failed to read flash JEDEC ID: {}", result.error().message);
         return 1;
     }
 
-    std::println("Flash:");
-    std::println("  JEDEC ID: {}", hexBytes(jedecId));
+    fmt::println("Flash:");
+    fmt::println("  JEDEC ID: {}", hexBytes(jedecId));
     return 0;
 #else
     (void)serial;
     (void)ispAddress;
     (void)i2cClockHz;
-    std::println("No programmer backends are enabled in this build.");
+    fmt::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
 }
@@ -128,32 +127,32 @@ int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockH
 
     auto i2c = mstar::ftdi::FtdiI2c::open(selector);
     if (!i2c) {
-        std::println(stderr, "Failed to open FTDI I2C channel: {}", i2c.error().message);
+        fmt::println(stderr, "Failed to open FTDI I2C channel: {}", i2c.error().message);
         return 1;
     }
 
     if (auto result = i2c->setClock(i2cClockHz); !result) {
-        std::println(stderr, "Failed to set I2C clock: {}", result.error().message);
+        fmt::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
 
-    std::println("Probing I2C address {:#x} at {} Hz...", i2cAddress, i2cClockHz);
-    std::println("Expect on a logic analyzer: START, address+W, ACK/NACK, STOP.");
+    fmt::println("Probing I2C address {:#x} at {} Hz...", i2cAddress, i2cClockHz);
+    fmt::println("Expect on a logic analyzer: START, address+W, ACK/NACK, STOP.");
 
     std::array<uint8_t, 1> probeByte{0x00};
     auto result = i2c->write(i2cAddress, probeByte);
     if (!result) {
-        std::println("No ACK ({})", result.error().message);
+        fmt::println("No ACK ({})", result.error().message);
         return 1;
     }
 
-    std::println("ACK received.");
+    fmt::println("ACK received.");
     return 0;
 #else
     (void)serial;
     (void)i2cAddress;
     (void)i2cClockHz;
-    std::println("No programmer backends are enabled in this build.");
+    fmt::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
 }
