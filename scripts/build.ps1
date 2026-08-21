@@ -7,6 +7,9 @@
 
 .PARAMETER Preset
     CMake preset to use (from CMakePresets.json). Default: windows
+    Use 'windows-no-ftdi' to build with MSTAR_ENABLE_FTDI=OFF; it configures
+    into its own build/windows-no-ftdi directory, kept separate from the
+    default 'windows' preset's build/windows.
 
 .PARAMETER Clean
     Delete the preset's build directory before configuring.
@@ -18,6 +21,8 @@
     ./scripts/build.ps1
 .EXAMPLE
     ./scripts/build.ps1 -Clean -Test
+.EXAMPLE
+    ./scripts/build.ps1 -Preset windows-no-ftdi -Test
 #>
 [CmdletBinding()]
 param(

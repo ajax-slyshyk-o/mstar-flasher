@@ -34,6 +34,15 @@
       }
     },
     {
+      "name": "windows-no-ftdi",
+      "displayName": "Windows x64 (MSVC, Ninja, no FTDI)",
+      "description": "Same as 'windows' but with MSTAR_ENABLE_FTDI=OFF, building into its own build/windows-no-ftdi directory. Verifies mstar-core stays hardware-independent without needing the D2XX/LibMPSSE SDKs.",
+      "inherits": "windows",
+      "cacheVariables": {
+        "MSTAR_ENABLE_FTDI": "OFF"
+      }
+    },
+    {
       "name": "linux",
       "displayName": "Linux x64 (GCC/Clang)",
       "inherits": "base",
@@ -54,6 +63,10 @@
       "configurePreset": "windows"
     },
     {
+      "name": "windows-no-ftdi",
+      "configurePreset": "windows-no-ftdi"
+    },
+    {
       "name": "linux",
       "configurePreset": "linux"
     }
@@ -62,6 +75,10 @@
     {
       "name": "windows",
       "configurePreset": "windows"
+    },
+    {
+      "name": "windows-no-ftdi",
+      "configurePreset": "windows-no-ftdi"
     },
     {
       "name": "linux",
