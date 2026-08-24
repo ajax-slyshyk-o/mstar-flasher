@@ -6,7 +6,8 @@
     "cli11",
     "catch2",
     "fmt",
-    "spdlog",
-    "nlohmann-json"
+    "nlohmann-json",
+    "toml11",
+    "serdepp"
   ]
 }

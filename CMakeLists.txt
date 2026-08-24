@@ -17,9 +17,10 @@ option(MSTAR_ENABLE_CH341 "Enable CH341 backend" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(CLI11 CONFIG REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(toml11 CONFIG REQUIRED)
+find_package(serdepp CONFIG REQUIRED)
 
 # mstar-core: hardware-independent MStar ISP / SPI bus / flash logic.
 # Must never link against D2XX, LibMPSSE or libusb.
@@ -28,7 +29,11 @@ add_library(mstar-core
 )
 target_include_directories(mstar-core PUBLIC include)
 target_compile_features(mstar-core PUBLIC cxx_std_23)
-target_link_libraries(mstar-core PUBLIC spdlog::spdlog fmt::fmt nlohmann_json::nlohmann_json)
+target_link_libraries(mstar-core PUBLIC 
+    fmt::fmt 
+    toml11::toml11 
+    nlohmann_json::nlohmann_json 
+    serdepp::serdepp)
 
 add_executable(mstar-cli src/app/main.cpp)
 target_link_libraries(mstar-cli PRIVATE mstar-core CLI11::CLI11)
