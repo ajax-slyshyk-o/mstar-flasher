@@ -65,7 +65,7 @@ int runList() {
 #endif
 }
 
-int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz) {
+int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz, bool stayInIsp) {
 #ifdef MSTAR_ENABLE_FTDI
     mstar::ProgrammerSelector selector;
     if (!serial.empty()) {
@@ -102,9 +102,12 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
     auto readResult = resetResult ? nand.readJedecId(jedecId) : resetResult;
 
     // Best-effort: release the SoC from ISP mode whether or not the JEDEC
-    // ID read below succeeded. probe must never leave the target stuck in
-    // a debug state.
-    if (auto leaveResult = isp.leave(); !leaveResult) {
+    // ID read below succeeded, unless the caller explicitly asked to stay
+    // in ISP mode (--stay-in-isp) to chain further commands without the
+    // target resuming execution and contending for the SPI bus in between.
+    if (stayInIsp) {
+        fmt::println("Note: --stay-in-isp set; target left halted in MStar ISP mode.");
+    } else if (auto leaveResult = isp.leave(); !leaveResult) {
         fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
                       leaveResult.error().message);
     }
@@ -137,6 +140,7 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
     (void)serial;
     (void)ispAddress;
     (void)i2cClockHz;
+    (void)stayInIsp;
     fmt::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
@@ -148,7 +152,8 @@ int runRead(
     uint32_t i2cClockHz,
     const std::string& outputPath,
     uint64_t offset,
-    uint64_t size
+    uint64_t size,
+    bool stayInIsp
 ) {
 #ifdef MSTAR_ENABLE_FTDI
     mstar::ProgrammerSelector selector;
@@ -173,14 +178,26 @@ int runRead(
         return 1;
     }
 
+    // Best-effort: release the SoC from ISP mode on every exit path, unless
+    // the caller explicitly asked to stay in ISP mode (--stay-in-isp) to
+    // chain further commands without the target resuming execution and
+    // contending for the SPI bus in between (see SpiNand::identify's
+    // "Unrecognized flash JEDEC ID" failures observed when re-entering ISP
+    // mode against an already-running target).
+    auto maybeLeaveIsp = [&] {
+        if (stayInIsp) {
+            fmt::println("Note: --stay-in-isp set; target left halted in MStar ISP mode.");
+        } else if (auto leaveResult = isp.leave(); !leaveResult) {
+            fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
+                          leaveResult.error().message);
+        }
+    };
+
     mstar::SpiNand nand(isp);
     auto part = nand.identify();
     if (!part) {
         fmt::println(stderr, "Failed to identify flash: {}", part.error().message);
-        if (auto leaveResult = isp.leave(); !leaveResult) {
-            fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
-                          leaveResult.error().message);
-        }
+        maybeLeaveIsp();
         return 1;
     }
 
@@ -193,10 +210,7 @@ int runRead(
     if (offset > flashBytes) {
         fmt::println(stderr, "Offset {:#x} is beyond the end of the flash ({} bytes)", offset,
                       flashBytes);
-        if (auto leaveResult = isp.leave(); !leaveResult) {
-            fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
-                          leaveResult.error().message);
-        }
+        maybeLeaveIsp();
         return 1;
     }
 
@@ -205,20 +219,14 @@ int runRead(
         fmt::println(
             stderr, "Requested range [{:#x}, {:#x}) exceeds the flash size ({} bytes)", offset,
             offset + readSize, flashBytes);
-        if (auto leaveResult = isp.leave(); !leaveResult) {
-            fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
-                          leaveResult.error().message);
-        }
+        maybeLeaveIsp();
         return 1;
     }
 
     std::ofstream out(outputPath, std::ios::binary | std::ios::trunc);
     if (!out) {
         fmt::println(stderr, "Failed to open output file: {}", outputPath);
-        if (auto leaveResult = isp.leave(); !leaveResult) {
-            fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
-                          leaveResult.error().message);
-        }
+        maybeLeaveIsp();
         return 1;
     }
 
@@ -256,10 +264,7 @@ int runRead(
 
     out.close();
 
-    if (auto leaveResult = isp.leave(); !leaveResult) {
-        fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
-                      leaveResult.error().message);
-    }
+    maybeLeaveIsp();
 
     if (fatalError) {
         return 1;
@@ -280,6 +285,7 @@ int runRead(
     (void)outputPath;
     (void)offset;
     (void)size;
+    (void)stayInIsp;
     fmt::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
@@ -340,11 +346,16 @@ int main(int argc, char** argv) {
     static std::string serial;
     static uint32_t ispAddress = 0x49;
     static uint32_t i2cClockHz = 100000;
+    static bool probeStayInIsp = false;
     probe->add_option("--serial", serial, "Select programmer by serial number");
     probe->add_option("--i2c-address", ispAddress, "MStar ISP I2C address")->default_val(0x49);
     probe->add_option("--i2c-clock", i2cClockHz, "I2C clock in Hz")->default_val(100000);
+    probe->add_flag(
+        "--stay-in-isp", probeStayInIsp,
+        "Don't release the target when done; keeps it halted so a following "
+        "probe/read doesn't have to re-win the SPI bus from a running SoC");
     probe->callback([] {
-        std::exit(runProbe(serial, static_cast<uint8_t>(ispAddress), i2cClockHz));
+        std::exit(runProbe(serial, static_cast<uint8_t>(ispAddress), i2cClockHz, probeStayInIsp));
     });
 
     auto* read = app.add_subcommand("read", "Read part or all of the flash's main area to a file");
@@ -354,6 +365,7 @@ int main(int argc, char** argv) {
     static std::string readOutputPath;
     static uint64_t readOffset = 0;
     static uint64_t readSize = 0;
+    static bool readStayInIsp = false;
     read->add_option("output", readOutputPath, "Output file path")->required();
     read->add_option("--serial", readSerial, "Select programmer by serial number");
     read->add_option("--i2c-address", readIspAddress, "MStar ISP I2C address")->default_val(0x49);
@@ -362,10 +374,14 @@ int main(int argc, char** argv) {
         ->default_val(0);
     read->add_option("--size", readSize, "Number of bytes to read (default: to end of flash)")
         ->default_val(0);
+    read->add_flag(
+        "--stay-in-isp", readStayInIsp,
+        "Don't release the target when done; keeps it halted so a following "
+        "probe/read doesn't have to re-win the SPI bus from a running SoC");
     read->callback([] {
         std::exit(runRead(
             readSerial, static_cast<uint8_t>(readIspAddress), readI2cClockHz, readOutputPath,
-            readOffset, readSize));
+            readOffset, readSize, readStayInIsp));
     });
 
     auto* i2cTest = app.add_subcommand(
