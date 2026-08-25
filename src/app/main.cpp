@@ -98,7 +98,7 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz)
     mstar::SpiNand nand(isp);
 
     auto resetResult = nand.reset();
-    std::array<uint8_t, 4> jedecId{};
+    std::array<uint8_t, 8> jedecId{};
     auto readResult = resetResult ? nand.readJedecId(jedecId) : resetResult;
 
     // Best-effort: release the SoC from ISP mode whether or not the JEDEC
