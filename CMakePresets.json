@@ -44,11 +44,14 @@
     },
     {
       "name": "linux",
-      "displayName": "Linux x64 (GCC/Clang)",
+      "displayName": "Linux x64 (Debug, libftdi1)",
+      "description": "Hardware build using system libftdi1 >= 1.5 and libusb-1.0. Requires pkg-config and their development packages.",
       "inherits": "base",
       "generator": "Ninja",
       "cacheVariables": {
-        "VCPKG_TARGET_TRIPLET": "x64-linux"
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MSTAR_ENABLE_FTDI": "ON"
       },
       "condition": {
         "type": "equals",
@@ -82,7 +85,8 @@
     },
     {
       "name": "linux",
-      "configurePreset": "linux"
+      "configurePreset": "linux",
+      "output": { "outputOnFailure": true }
     }
   ]
 }

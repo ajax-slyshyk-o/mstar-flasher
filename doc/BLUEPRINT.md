@@ -1,5 +1,11 @@
 # MStar / SigmaStar Cross-Platform In-System Flasher
 
+> Linux implementation update: the `linux` preset uses system libftdi1 >= 1.5
+> and libusb with a native MPSSE backend, following the TEA2017 Linux transport
+> approach. It keeps FT2232D two-phase clocking and the LibMPSSE GPIO sequences;
+> Windows still uses D2XX + LibMPSSE. The D2XX/LibMPSSE stack below describes
+> the original plan. Linux has offline backend tests; bench validation is pending.
+
 ## 1. Project goal
 
 Create a cross-platform command-line utility for **in-system programming of SPI-NAND and SPI-NOR attached to MStar/SigmaStar SoCs**, without desoldering the flash.
@@ -954,12 +960,13 @@ cmake -S . -B build ^
   -DLIBMPSSE_ROOT=C:/SDK/FTDI/LibMPSSE
 ```
 
-Linux equivalent:
+Linux uses system libftdi1/libusb development packages instead of these SDK paths
+(see README for prerequisites):
 
 ```console
-cmake -S . -B build \
-  -DFTD2XX_ROOT=/opt/ftdi \
-  -DLIBMPSSE_ROOT=/opt/ftdi/libmpsse
+cmake --preset linux
+cmake --build --preset linux
+ctest --preset linux
 ```
 
 Tests and the core library must build when:

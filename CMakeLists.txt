@@ -41,19 +41,23 @@ add_executable(mstar-cli src/app/main.cpp)
 target_link_libraries(mstar-cli PRIVATE mstar-core CLI11::CLI11)
 
 if(MSTAR_ENABLE_FTDI)
-    find_package(FTD2XX REQUIRED)
-    find_package(LibMPSSE REQUIRED)
-
-    add_library(mstar-ftdi
-        src/transport/ftdi/ftdi_device.cpp
-        src/transport/ftdi/ftdi_i2c.cpp
-        src/transport/ftdi/ftdi_console.cpp
-    )
+    add_library(mstar-ftdi)
     target_include_directories(mstar-ftdi PUBLIC include)
-    target_link_libraries(mstar-ftdi
-        PUBLIC mstar-core
-        PRIVATE FTD2XX::FTD2XX LibMPSSE::LibMPSSE
-    )
+    target_link_libraries(mstar-ftdi PUBLIC mstar-core)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(LIBFTDI REQUIRED IMPORTED_TARGET libftdi1>=1.5 libusb-1.0)
+        target_sources(mstar-ftdi PRIVATE src/transport/ftdi/linux/ftdi_i2c.cpp)
+        target_link_libraries(mstar-ftdi PRIVATE PkgConfig::LIBFTDI)
+    else()
+        find_package(FTD2XX REQUIRED)
+        find_package(LibMPSSE REQUIRED)
+        target_sources(mstar-ftdi PRIVATE
+            src/transport/ftdi/ftdi_device.cpp
+            src/transport/ftdi/ftdi_i2c.cpp
+            src/transport/ftdi/ftdi_console.cpp)
+        target_link_libraries(mstar-ftdi PRIVATE FTD2XX::FTD2XX LibMPSSE::LibMPSSE)
+    endif()
     target_link_libraries(mstar-cli PRIVATE mstar-ftdi)
     target_compile_definitions(mstar-cli PRIVATE MSTAR_ENABLE_FTDI)
 
@@ -85,4 +89,13 @@ if(MSTAR_BUILD_TESTS)
     target_include_directories(mstar-tests PRIVATE tests)
 
     add_test(NAME mstar-tests COMMAND mstar-tests)
+
+    if(MSTAR_ENABLE_FTDI AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Fake C APIs exercise the real backend without linking any USB library.
+        add_executable(mstar-linux-tests tests/test_ftdi_linux.cpp
+            src/transport/ftdi/linux/ftdi_i2c.cpp)
+        target_include_directories(mstar-linux-tests SYSTEM PRIVATE ${LIBFTDI_INCLUDE_DIRS})
+        target_link_libraries(mstar-linux-tests PRIVATE mstar-core Catch2::Catch2WithMain)
+        add_test(NAME mstar-linux-tests COMMAND mstar-linux-tests)
+    endif()
 endif()

@@ -11,7 +11,7 @@
 
 namespace mstar::ftdi {
 
-/// FT2232D-based I2C master backed by D2XX + LibMPSSE-I2C.
+/// FT2232D-based I2C master: libftdi1 on Linux, D2XX + LibMPSSE elsewhere.
 ///
 /// No FT_HANDLE, FT_STATUS or LibMPSSE type ever appears in this header -
 /// they are confined to the Impl defined in ftdi_i2c.cpp.
