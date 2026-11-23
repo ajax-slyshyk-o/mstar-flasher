@@ -15,6 +15,7 @@ struct libusb_device {
     uint16_t product = 0x6010;
     uint16_t version = 0x0500;
     std::string serial = "MSTAR";
+    bool accessible = true;
 };
 struct libusb_device_handle { libusb_device* device; };
 
@@ -148,10 +149,14 @@ int libusb_get_device_descriptor(libusb_device* device, libusb_device_descriptor
     return 0;
 }
 int libusb_open(libusb_device* device, libusb_device_handle** handle) {
-    if (fake.failure == "descriptor open") return LIBUSB_ERROR_ACCESS;
+    if (fake.failure == "descriptor open" || !device->accessible) return LIBUSB_ERROR_ACCESS;
     *handle = new libusb_device_handle{device};
     ++fake.handles;
     return 0;
+}
+uint8_t libusb_get_bus_number(libusb_device*) { return 1; }
+uint8_t libusb_get_device_address(libusb_device* device) {
+    return static_cast<uint8_t>(device - fake.devices.data() + 2);
 }
 void libusb_close(libusb_device_handle* handle) { delete handle; --fake.handles; }
 int libusb_get_string_descriptor_ascii(libusb_device_handle* handle, uint8_t index,
@@ -174,6 +179,51 @@ TEST_CASE_METHOD(Fixture, "Linux enumeration exposes only MPSSE channels without
     CHECK(devices->front().location == "A");
     CHECK(devices->front().kind == "FT2232C/D");
     CHECK_FALSE(devices->front().comPort);
+    CHECK(devices->front().usbLocation == "1:2");
+    CHECK(devices->front().accessError.empty());
+    CHECK(fake.opens == 0);
+    CHECK(fake.writes.empty());
+}
+
+TEST_CASE_METHOD(Fixture, "Linux lists inaccessible flashers alongside accessible ones", "[linux]") {
+    fake.devices[0].accessible = false;
+    fake.devices.push_back({0x6014, 0x0900, "SECOND"});
+    auto devices = FtdiI2c::enumerate();
+    REQUIRE(devices);
+    REQUIRE(devices->size() == 2);
+    CHECK(devices->at(0).kind == "FT2232C/D");
+    CHECK(devices->at(0).location == "A");
+    CHECK(devices->at(0).usbLocation == "1:2");
+    CHECK(devices->at(0).serial.empty());
+    CHECK(devices->at(0).description.empty());
+    CHECK(devices->at(0).accessError.find("permissions/udev") != std::string::npos);
+    CHECK(devices->at(1).kind == "FT232H");
+    CHECK(devices->at(1).serial == "SECOND");
+    CHECK(devices->at(1).usbLocation == "1:3");
+    CHECK(devices->at(1).accessError.empty());
+    CHECK(fake.opens == 0);
+    CHECK(fake.writes.empty());
+}
+
+TEST_CASE_METHOD(Fixture, "Linux listing handles empty inventories and unavailable strings", "[linux]") {
+    SECTION("no devices") {
+        fake.devices.clear();
+        auto devices = FtdiI2c::enumerate();
+        REQUIRE(devices);
+        CHECK(devices->empty());
+    }
+    SECTION("strings unreadable") {
+        fake.failure = "string";
+        auto devices = FtdiI2c::enumerate();
+        REQUIRE(devices);
+        REQUIRE(devices->size() == 1);
+        CHECK(devices->front().serial.empty());
+        CHECK_FALSE(devices->front().accessError.empty());
+    }
+    SECTION("enumeration failure") {
+        fake.failure = "list";
+        CHECK_FALSE(FtdiI2c::enumerate());
+    }
     CHECK(fake.opens == 0);
     CHECK(fake.writes.empty());
 }

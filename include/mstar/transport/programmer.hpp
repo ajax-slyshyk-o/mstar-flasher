@@ -15,6 +15,8 @@ struct ProgrammerInfo {
                                // description/serial may be incomplete
     std::optional<int> comPort; // Windows VCP COM port bound to this channel,
                                  // if any; always nullopt on other platforms
+    std::string usbLocation{}; // bus:address on Linux; available without opening the device
+    std::string accessError{}; // enumeration succeeded, but device strings were inaccessible
 };
 
 /// Criteria for selecting a specific programmer among several enumerated

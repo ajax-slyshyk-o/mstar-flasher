@@ -90,6 +90,11 @@ if(MSTAR_BUILD_TESTS)
 
     add_test(NAME mstar-tests COMMAND mstar-tests)
 
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test(NAME mstar-linux-setup
+            COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_setup_linux.sh")
+    endif()
+
     if(MSTAR_ENABLE_FTDI AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Fake C APIs exercise the real backend without linking any USB library.
         add_executable(mstar-linux-tests tests/test_ftdi_linux.cpp

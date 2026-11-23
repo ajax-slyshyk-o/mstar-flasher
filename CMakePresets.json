@@ -8,7 +8,8 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "MSTAR_ENABLE_FTDI": "ON"
       }
     },
     {
@@ -50,13 +51,20 @@
       "generator": "Ninja",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "CMAKE_BUILD_TYPE": "Debug",
-        "MSTAR_ENABLE_FTDI": "ON"
+        "CMAKE_BUILD_TYPE": "Debug"
       },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux x64 (Release, libftdi1)",
+      "inherits": "linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
       }
     }
   ],
@@ -72,6 +80,10 @@
     {
       "name": "linux",
       "configurePreset": "linux"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release"
     }
   ],
   "testPresets": [
@@ -86,6 +98,11 @@
     {
       "name": "linux",
       "configurePreset": "linux",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release",
       "output": { "outputOnFailure": true }
     }
   ]

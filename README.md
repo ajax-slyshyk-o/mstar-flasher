@@ -30,11 +30,31 @@ cmake --build --preset windows
 ctest --preset windows
 ```
 
-On Linux, install the system USB development packages (Ubuntu/Debian):
+On Linux, check build tools, USB libraries, permissions and attached programmers:
 
 ```console
-sudo apt install pkg-config libftdi1-dev libusb-1.0-0-dev
+./scripts/setup-linux.sh --check
 ```
+
+To install missing prerequisites and configure USB access:
+
+```console
+sudo ./scripts/setup-linux.sh --with-build-tools
+```
+
+The script shows a plan and asks before changing anything. It installs missing
+`libftdi1-dev`, `libusb-1.0-0-dev` and `pkg-config` packages on Ubuntu/Debian;
+`--with-build-tools` also installs missing build utilities. It reports compiler
+versions and `VCPKG_ROOT`, but does not install vcpkg or upgrade an old compiler.
+Run `--help` for noninteractive and skip options.
+
+USB setup writes `/etc/udev/rules.d/60-mstar-ftdi.rules` for FTDI product IDs
+`6010`, `6011` and `6014`, grants `plugdev`/desktop-session access and tells
+ModemManager to ignore those devices. It leaves the kernel UART driver enabled.
+Existing rules are backed up before replacement; repeat runs leave matching
+rules alone. Re-plug the programmer afterward, and log out/in if group membership
+changed. Run `--check` again as your normal user. Check mode exits 1 when USB
+prerequisites remain missing; build-tool checks are informational.
 
 The `linux` profile enables FTDI and uses libftdi1 >= 1.5. It does not use
 the Windows SDK archives. C++ dependencies still come from vcpkg.
@@ -52,6 +72,18 @@ FTDI USB IDs. Multi-channel serials include the channel suffix (for example,
 appropriate device permissions/udev rules. The backend detaches only the
 selected interface's kernel driver and requests reattachment on close.
 
+List connected flashers:
+
+```console
+./build/linux/mstar-cli list
+```
+
+This prints each flasher's type, description, serial and channel, plus its USB
+bus/address on Linux (or COM port on Windows when available). On Linux, devices
+with restricted USB permissions still appear with their type and USB location;
+a note explains why their serial/description could not be read. Listing does
+not enter ISP mode or communicate with the target flash.
+
 `MSTAR_ENABLE_FTDI` defaults to `ON`. For an offline build without USB SDKs:
 
 ```console
@@ -67,3 +99,16 @@ cmake --preset windows -DMSTAR_ENABLE_FTDI=ON \
   -DFTD2XX_ROOT=C:/SDK/FTDI/D2XX \
   -DLIBMPSSE_ROOT=C:/SDK/FTDI/LibMPSSE
 ```
+
+## Linux release archive
+
+```console
+./scripts/publish-linux.sh --jobs 4
+```
+
+This builds the `linux-release` preset, runs offline tests and creates
+`build/publish/mstar-flasher-linux-<architecture>.tar.gz`. Use `--output-dir DIR`
+to choose another destination. The archive contains `mstar-cli`, this README,
+and `scripts/setup-linux.sh`; after extracting, run `./mstar-cli list` from its
+top-level directory. Compatible system runtime libraries (including libstdc++,
+libftdi1 and libusb) are required. The script does not upload or install anything.

@@ -33,7 +33,7 @@ struct Inventory {
     std::vector<Channel> channels;
     ~Inventory() { if (devices) libusb_free_device_list(devices, 1); }
 
-    Result<void> scan(ftdi_context* ctx) {
+    Result<void> scan(ftdi_context* ctx, bool allowUnavailable = false) {
         if (!ctx) return fail(ErrorCode::Usb, "ftdi_new failed");
         const auto count = libusb_get_device_list(ctx->usb_ctx, &devices);
         if (count < 0) return usbError(static_cast<int>(count), "USB enumeration failed");
@@ -59,10 +59,12 @@ struct Inventory {
             }
             // Reading descriptors claims no interface and leaves the UART driver attached.
             libusb_device_handle* raw = nullptr;
-            if (const int r = libusb_open(devices[i], &raw); r < 0)
-                return usbError(r, "USB descriptor open failed");
+            const int opened = libusb_open(devices[i], &raw);
+            if (opened < 0 && !allowUnavailable)
+                return usbError(opened, "USB descriptor open failed");
             std::unique_ptr<libusb_device_handle, decltype(&libusb_close)> handle(raw, libusb_close);
             const auto string = [&](uint8_t index) -> Result<std::string> {
+                if (opened < 0) return usbError(opened, "USB descriptor open failed");
                 if (index == 0) return std::string{};
                 std::array<unsigned char, 256> buffer{};
                 const int size = libusb_get_string_descriptor_ascii(raw, index, buffer.data(),
@@ -71,19 +73,27 @@ struct Inventory {
                 return std::string(reinterpret_cast<char*>(buffer.data()), size);
             };
             auto serial = string(desc.iSerialNumber);
-            if (!serial) return std::unexpected(serial.error());
+            if (!serial && !allowUnavailable) return std::unexpected(serial.error());
             auto description = string(desc.iProduct);
-            if (!description) return std::unexpected(description.error());
+            if (!description && !allowUnavailable) return std::unexpected(description.error());
+            const std::string accessError = !serial ? serial.error().message :
+                                            !description ? description.error().message : "";
+            const auto usbLocation = fmt::format("{}:{}", libusb_get_bus_number(devices[i]),
+                                                libusb_get_device_address(devices[i]));
             for (int port = 0; port < ports; ++port) {
                 std::string letter(1, static_cast<char>('A' + port));
                 // Match D2XX's per-channel serials on multi-interface chips.
                 channels.push_back({ProgrammerInfo{
                     .kind = kind,
-                    .description = *description + (type == TYPE_232H ? "" : " " + letter),
-                    .serial = *serial + (serial->empty() || type == TYPE_232H ? "" : letter),
+                    .description = description && !description->empty() ?
+                        *description + (type == TYPE_232H ? "" : " " + letter) : "",
+                    .serial = serial && !serial->empty() ?
+                        *serial + (type == TYPE_232H ? "" : letter) : "",
                     .location = letter,
                     .inUse = false, // libusb reports busy only when claiming the interface
                     .comPort = std::nullopt,
+                    .usbLocation = usbLocation,
+                    .accessError = accessError,
                 }, devices[i], port == 0 ? INTERFACE_A : INTERFACE_B, type});
             }
         }
@@ -246,7 +256,7 @@ FtdiI2c::~FtdiI2c() = default;
 Result<std::vector<ProgrammerInfo>> FtdiI2c::enumerate() {
     Impl impl;
     Inventory inventory;
-    if (auto r = inventory.scan(impl.ctx.get()); !r) return std::unexpected(r.error());
+    if (auto r = inventory.scan(impl.ctx.get(), true); !r) return std::unexpected(r.error());
     std::vector<ProgrammerInfo> info;
     for (auto& channel : inventory.channels) info.push_back(std::move(channel.info));
     return info;

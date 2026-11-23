@@ -46,15 +46,21 @@ int runList() {
     for (const auto& dev : *devices) {
         fmt::println("Programmer:");
         fmt::println("  FTDI device: {}", dev.kind);
-        fmt::println("  Description: {}", dev.description);
-        fmt::println("  Serial: {}", dev.serial);
+        fmt::println("  Description: {}", dev.description.empty() ? "-" : dev.description);
+        fmt::println("  Serial: {}", dev.serial.empty() ? "-" : dev.serial);
         fmt::println("  Channel: {}", dev.location.empty() ? "-" : dev.location);
+        if (!dev.usbLocation.empty()) {
+            fmt::println("  USB location: {}", dev.usbLocation);
+        }
         if (dev.comPort) {
             fmt::println("  COM port: COM{}", *dev.comPort);
         }
         if (dev.inUse) {
             fmt::println(
                 "  Note: held open by another process/driver (fields above may be incomplete)");
+        }
+        if (!dev.accessError.empty()) {
+            fmt::println("  Note: {} (device details may be incomplete)", dev.accessError);
         }
         fmt::println("");
     }
@@ -339,7 +345,7 @@ int main(int argc, char** argv) {
     CLI::App app{"mstar-flasher: in-system programmer for MStar/SigmaStar SPI-NAND/NOR"};
     app.require_subcommand(1);
 
-    app.add_subcommand("list", "List detected programmer devices")
+    app.add_subcommand("list", "List connected flashers")
         ->callback([] { std::exit(runList()); });
 
     auto* probe = app.add_subcommand("probe", "Identify the attached flash without modifying it");
