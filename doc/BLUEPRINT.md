@@ -56,7 +56,7 @@ Nothing above `I2cMaster` should depend on the programmer hardware.
 
 ---
 
-# 2. Important non-goals for the first milestone
+## 2. Important non-goals for the first milestone
 
 Do **not** initially implement:
 
@@ -99,7 +99,7 @@ Flash:
 
 ---
 
-# 3. Language and build system
+## 3. Language and build system
 
 Use:
 
@@ -131,7 +131,7 @@ Do not require the FTDI SDK to build the core library or unit tests.
 
 ---
 
-# 4. Repository structure
+## 4. Repository structure
 
 Initialize the repository approximately as:
 
@@ -207,7 +207,7 @@ without changing `isp/` or `flash/`.
 
 ---
 
-# 5. Core abstraction: I2cMaster
+## 5. Core abstraction: I2cMaster
 
 The MStar ISP implementation must depend only on a generic I²C master.
 
@@ -258,7 +258,7 @@ Do not leak `FT_HANDLE`, `FT_STATUS`, LibMPSSE constants or libusb types through
 
 ---
 
-# 6. FT2232D backend
+## 6. FT2232D backend
 
 Use:
 
@@ -344,7 +344,7 @@ Do not optimize speed until communication is proven reliable.
 
 ---
 
-# 7. MStar ISP protocol layer
+## 7. MStar ISP protocol layer
 
 Create:
 
@@ -472,7 +472,7 @@ Do not release CS between `0x9F` and reading the ID.
 
 ---
 
-# 8. SpiBus abstraction
+## 8. SpiBus abstraction
 
 The flash code must not know that SPI is transported through MStar ISP.
 
@@ -512,7 +512,7 @@ Later another SPI transport could theoretically be added without rewriting NAND 
 
 ---
 
-# 9. SPI-NAND layer
+## 9. SPI-NAND layer
 
 Do not immediately copy the complete SNANDer NAND implementation.
 
@@ -604,7 +604,7 @@ but these are later milestones.
 
 ---
 
-# 10. Flash database
+## 10. Flash database
 
 Do not hard-code flash logic into `spi_nand.cpp`.
 
@@ -630,7 +630,7 @@ Treat these repositories as **reference implementations**, not as code to paste 
 
 ---
 
-# 11. Error handling
+## 11. Error handling
 
 Use `std::expected`.
 
@@ -675,7 +675,7 @@ No `FT_STATUS` should escape into the MStar or NAND layers.
 
 ---
 
-# 12. Logging and protocol tracing
+## 12. Logging and protocol tracing
 
 Implement two levels:
 
@@ -712,7 +712,7 @@ with an optional explicit hex-dump mode.
 
 ---
 
-# 13. CLI design
+## 13. CLI design
 
 Initial CLI:
 
@@ -752,7 +752,7 @@ Never make `probe` destructive.
 
 ---
 
-# 14. Testing strategy
+## 14. Testing strategy
 
 This is important: **the MStar ISP protocol should be testable without hardware**.
 
@@ -799,7 +799,7 @@ Hardware tests are a separate manual/integration test suite.
 
 ---
 
-# 15. Hardware validation strategy
+## 15. Hardware validation strategy
 
 Before implementing flash writes:
 
@@ -856,7 +856,7 @@ Only after these pass should erase/program commands be enabled.
 
 ---
 
-# 16. FT2232D UART console — later milestone
+## 16. FT2232D UART console — later milestone
 
 Keep UART separate from `I2cMaster`.
 
@@ -893,7 +893,7 @@ docs/HARDWARE.md
 
 ---
 
-# 17. Future CH341 backend
+## 17. Future CH341 backend
 
 CH341 support must require **no changes** to:
 
@@ -935,7 +935,7 @@ with automatic detection as the default.
 
 ---
 
-# 18. CMake configuration
+## 18. CMake configuration
 
 Provide options:
 
@@ -979,7 +979,7 @@ This makes CI independent of proprietary/vendor SDK binaries.
 
 ---
 
-# 19. CMake targets
+## 19. CMake targets
 
 Prefer separate targets:
 
@@ -1025,7 +1025,7 @@ mstar-tests
 
 ---
 
-# 20. Licensing rule
+## 20. Licensing rule
 
 Decide the new project's license independently.
 
@@ -1052,9 +1052,9 @@ The same rule applies when consulting `ufprog`: check the license of any specifi
 
 ---
 
-# 21. Reference material
+## 21. Reference material
 
-## Essential FTDI documentation
+### Essential FTDI documentation
 
 **FTDI D2XX drivers**
 
@@ -1088,7 +1088,7 @@ Hardware/MPSSE reference for the original programmer.
 
 ---
 
-## Essential MStar/SigmaStar references
+### Essential MStar/SigmaStar references
 
 **fifteenhex/snander_electricboogaloo**
 
@@ -1140,7 +1140,7 @@ original FT2232D programmer hardware
 
 ---
 
-## SPI-NAND references
+### SPI-NAND references
 
 **Droid-MAX/SNANDer**
 
@@ -1174,7 +1174,7 @@ controller/interface separation
 
 ---
 
-## Future CH341 dependency
+### Future CH341 dependency
 
 **libusb**
 
@@ -1184,7 +1184,7 @@ Use for the eventual CH341 backend.
 
 ---
 
-## Development dependencies
+### Development dependencies
 
 **CLI11**
 
@@ -1196,9 +1196,9 @@ Use for the eventual CH341 backend.
 
 ---
 
-# 22. Implementation milestones
+## 22. Implementation milestones
 
-## Current progress and next steps (2026-11-24)
+### Current progress and next steps (2026-11-24)
 
 Implementation and hardware acceptance are tracked separately:
 
@@ -1256,7 +1256,7 @@ Work in this order:
 
 The original milestone definitions and acceptance criteria follow.
 
-## Milestone 0 — project skeleton
+### Milestone 0 — project skeleton
 
 Copilot should:
 
@@ -1278,7 +1278,7 @@ unit tests: PASS
 hardware code: not required
 ```
 
-## Milestone 1 — FTDI discovery
+### Milestone 1 — FTDI discovery
 
 Implement:
 
@@ -1293,7 +1293,7 @@ original FT2232D programmer is enumerated
 serial/description/channel are displayed
 ```
 
-## Milestone 2 — FTDI I²C
+### Milestone 2 — FTDI I²C
 
 Implement `FtdiI2c`.
 
@@ -1304,7 +1304,7 @@ START/address/data/STOP verified on logic analyzer
 0x49 ACK observed
 ```
 
-## Milestone 3 — MStar ISP + JEDEC ID
+### Milestone 3 — MStar ISP + JEDEC ID
 
 Implement `MstarIsp`.
 
@@ -1324,7 +1324,7 @@ reads flash JEDEC ID
 
 No flash modification.
 
-## Milestone 4 — flash identification and read
+### Milestone 4 — flash identification and read
 
 Implement enough SPI-NAND/SPI-NOR support to identify the connected flash and read data.
 
@@ -1340,13 +1340,13 @@ Acceptance condition:
 two complete reads produce identical files
 ```
 
-## Milestone 5 — NAND ECC/OOB/bad-block handling
+### Milestone 5 — NAND ECC/OOB/bad-block handling
 
 Implement robust NAND status interpretation.
 
 Do not add programming until reads and ECC handling are trusted.
 
-## Milestone 6 — erase/write/verify
+### Milestone 6 — erase/write/verify
 
 Add destructive operations with explicit confirmation.
 
@@ -1361,7 +1361,7 @@ verify
 
 Verification failure must return non-zero exit status.
 
-## Milestone 7 — UART console
+### Milestone 7 — UART console
 
 Reverse-engineer FT2232D channel B and the 74HC08 routing.
 
@@ -1371,7 +1371,7 @@ Add:
 mstar-flasher console
 ```
 
-## Milestone 8 — CH341
+### Milestone 8 — CH341
 
 Implement `Ch341I2c` using libusb.
 
@@ -1379,7 +1379,7 @@ No MStar/NAND layer changes should be required.
 
 ---
 
-# 23. Instructions specifically for GitHub Copilot
+## 23. Instructions specifically for GitHub Copilot
 
 When initializing this project:
 
