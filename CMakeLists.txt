@@ -90,6 +90,14 @@ if(MSTAR_BUILD_TESTS)
 
     add_test(NAME mstar-tests COMMAND mstar-tests)
 
+    # Exercise D2XX/LibMPSSE ownership on any host without vendor SDKs or USB.
+    add_executable(mstar-d2xx-tests tests/test_ftdi_d2xx.cpp
+        src/transport/ftdi/ftdi_i2c.cpp)
+    target_include_directories(mstar-d2xx-tests PRIVATE
+        tests/fake_ftdi_sdk src/transport/ftdi)
+    target_link_libraries(mstar-d2xx-tests PRIVATE mstar-core Catch2::Catch2WithMain)
+    add_test(NAME mstar-d2xx-tests COMMAND mstar-d2xx-tests)
+
     # Exercise real CLI parsing, exit codes and file I/O with a fake programmer.
     # This target never links the hardware backend, even in FTDI-enabled builds.
     add_executable(mstar-cli-read-tests src/app/main.cpp tests/fake_ftdi_read.cpp)

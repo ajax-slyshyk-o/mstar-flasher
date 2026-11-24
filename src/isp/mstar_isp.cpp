@@ -30,20 +30,26 @@ Result<void> MstarIsp::transaction(
     writePayload.push_back(static_cast<uint8_t>(MstarDdcCommand::SpiWrite));
     writePayload.insert(writePayload.end(), tx.begin(), tx.end());
 
-    if (auto result = i2c_->write(ispAddress_, writePayload); !result) {
-        return result;
-    }
+    auto result = i2c_->write(ispAddress_, writePayload);
 
-    if (!rx.empty()) {
+    if (result && !rx.empty()) {
         std::array<uint8_t, 1> readCommand{
             static_cast<uint8_t>(MstarDdcCommand::SpiRead)};
-        if (auto result = i2c_->writeRead(ispAddress_, readCommand, rx); !result) {
-            return result;
-        }
+        result = i2c_->writeRead(ispAddress_, readCommand, rx);
     }
 
+    // A failed transfer may still have reached the target and asserted SPI CS.
+    // Attempt SPI_END exactly once, without retrying any payload, and keep the
+    // original transfer error if releasing CS also fails.
     std::array<uint8_t, 1> endCommand{static_cast<uint8_t>(MstarDdcCommand::SpiEnd)};
-    return i2c_->write(ispAddress_, endCommand);
+    if (auto endResult = i2c_->write(ispAddress_, endCommand); !endResult) {
+        if (result) {
+            return std::unexpected(Error{
+                endResult.error().code, "SPI_END failed: " + endResult.error().message});
+        }
+        result.error().message += "; SPI_END also failed: " + endResult.error().message;
+    }
+    return result;
 }
 
 } // namespace mstar

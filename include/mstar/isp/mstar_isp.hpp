@@ -41,6 +41,8 @@ public:
     ///   write:  0x12
     /// The SPI chip-select is asserted for the whole transaction and
     /// released only by the trailing 0x12.
+    /// Attempts 0x12 once even if a transfer fails; preserves the original
+    /// error and appends any cleanup failure. Payloads are never retried.
     Result<void> transaction(
         std::span<const uint8_t> tx,
         std::span<uint8_t> rx

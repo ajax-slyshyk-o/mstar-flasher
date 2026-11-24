@@ -1,6 +1,9 @@
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -28,13 +31,14 @@ public:
     }
 
     Result<void> write(uint8_t address, std::span<const uint8_t> data) override {
-        if (failNextWrite) {
-            failNextWrite = false;
-            return std::unexpected(Error{ErrorCode::I2cNack, "mock write NACK"});
-        }
+        ++writeCalls;
         transactions.push_back(RecordedTransaction{
             TransactionKind::Write, address,
             std::vector<uint8_t>(data.begin(), data.end()), {}});
+        if (failNextWrite || failWriteAt == writeCalls) {
+            failNextWrite = false;
+            return std::unexpected(Error{ErrorCode::I2cNack, "mock write NACK"});
+        }
         return {};
     }
 
@@ -81,6 +85,8 @@ public:
     bool failNextWrite = false;
     bool failNextRead = false;
     bool failNextWriteRead = false;
+    std::size_t writeCalls = 0;
+    std::optional<std::size_t> failWriteAt; // One-based; includes failed attempts.
 
 private:
     void fillFromQueue(std::span<uint8_t> out) {

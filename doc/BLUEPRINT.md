@@ -1224,10 +1224,17 @@ Work in this order:
    real CLI with a fake programmer and failing output devices, without hardware.
    Validation: Linux Debug, Release and FTDI-disabled test suites pass. Hardware
    acceptance and vendor-specific ECC interpretation remain steps 3 and 4.
-2. **Fix error-path cleanup — pending.**
-   Attempt SPI_END after failed ISP transactions without hiding the original
-   failure. Fix the Windows FTDI initialization path closing a handle twice.
-   Add failure-injection tests for these cleanup paths.
+2. **Fix error-path cleanup — implemented and offline-tested.**
+   ISP transactions attempt SPI_END once after success or a transfer failure,
+   without replaying the payload. The original error code/message is preserved;
+   cleanup failures are appended, or reported directly if the transfer succeeded.
+   The D2XX backend allocates its handle owner before opening the channel and
+   relies on that owner to close it once, including on initialization failure.
+   Failure-injection tests reproduced both bugs before the fixes. Tests cover
+   write/read/end failures, combined failures, failed opens, reinitialization,
+   and moves. The real D2XX I2C source is compiled against test-only SDK stubs.
+   Validation: Linux Debug, Release and FTDI-disabled suites pass. Native Windows
+   SDK/driver validation and hardware acceptance remain pending.
 3. **Complete hardware acceptance — pending.**
    Check/apply host USB setup, verify START/address/ACK/STOP and repeated START
    on a logic analyzer, identify the actual target, then compare two complete

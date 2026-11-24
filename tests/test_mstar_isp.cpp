@@ -61,7 +61,7 @@ TEST_CASE("MstarIsp::enter surfaces a NACK during MSTAR activation", "[isp]") {
     CHECK(result.error().code == ErrorCode::I2cNack);
 }
 
-TEST_CASE("MstarIsp::transaction propagates a failed SPI read", "[isp]") {
+TEST_CASE("MstarIsp::transaction ends SPI after a failed read and preserves the error", "[isp]") {
     MockI2cMaster i2c;
     MstarIsp isp(i2c);
     i2c.failNextWriteRead = true;
@@ -72,11 +72,77 @@ TEST_CASE("MstarIsp::transaction propagates a failed SPI read", "[isp]") {
 
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error().code == ErrorCode::I2cTransfer);
+    CHECK(result.error().message == "mock writeRead failure");
 
-    // The 0x10 write happened, but 0x12 must not be sent once the read failed
-    // mid-transaction with no explicit recovery path.
-    REQUIRE(i2c.transactions.size() == 2);
+    REQUIRE(i2c.transactions.size() == 3);
     CHECK(i2c.transactions[1].kind == TransactionKind::WriteRead);
+    CHECK(i2c.transactions[2].kind == TransactionKind::Write);
+    CHECK(i2c.transactions[2].tx == std::vector<uint8_t>{0x12});
+}
+
+TEST_CASE("MstarIsp::transaction ends SPI after a failed write without reading or retrying", "[isp]") {
+    MockI2cMaster i2c;
+    MstarIsp isp(i2c, 0x4A);
+    i2c.failNextWrite = true;
+    std::array<uint8_t, 1> tx{0x9F};
+    std::array<uint8_t, 3> rx{};
+
+    auto result = isp.transaction(tx, rx);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == ErrorCode::I2cNack);
+    CHECK(result.error().message == "mock write NACK");
+    REQUIRE(i2c.transactions.size() == 2);
+    CHECK(i2c.transactions[0].tx == std::vector<uint8_t>{0x10, 0x9F});
+    CHECK(i2c.transactions[1].tx == std::vector<uint8_t>{0x12});
+    CHECK(i2c.transactions[1].kind == TransactionKind::Write);
+    CHECK(i2c.transactions[0].address == 0x4A);
+    CHECK(i2c.transactions[1].address == 0x4A);
+}
+
+TEST_CASE("MstarIsp::transaction reports SPI_END failure after a successful transfer", "[isp]") {
+    MockI2cMaster i2c;
+    MstarIsp isp(i2c);
+    i2c.failWriteAt = 2;
+    std::array<uint8_t, 1> tx{0x9F};
+    std::array<uint8_t, 3> rx{};
+    Result<void> result;
+    SECTION("write only") { result = isp.transaction(tx, {}); }
+    SECTION("write and read") {
+        i2c.queueResponse({0xEF, 0xAA, 0x22});
+        result = isp.transaction(tx, rx);
+        CHECK(rx == std::array<uint8_t, 3>{0xEF, 0xAA, 0x22});
+    }
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == ErrorCode::I2cNack);
+    CHECK(result.error().message == "SPI_END failed: mock write NACK");
+    CHECK(i2c.writeCalls == 2);
+    CHECK(i2c.transactions.back().tx == std::vector<uint8_t>{0x12});
+}
+
+TEST_CASE("MstarIsp::transaction retains the transfer error when SPI_END also fails", "[isp]") {
+    MockI2cMaster i2c;
+    MstarIsp isp(i2c);
+    i2c.failWriteAt = 2;
+    ErrorCode expected = ErrorCode::I2cTransfer;
+    std::string message;
+    SECTION("read failure") {
+        i2c.failNextWriteRead = true;
+        message = "mock writeRead failure";
+    }
+    SECTION("write failure") {
+        i2c.failNextWrite = true;
+        expected = ErrorCode::I2cNack;
+        message = "mock write NACK";
+    }
+    std::array<uint8_t, 1> tx{0x9F};
+    std::array<uint8_t, 3> rx{};
+    auto result = isp.transaction(tx, rx);
+
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == expected);
+    CHECK(result.error().message == message + "; SPI_END also failed: mock write NACK");
+    CHECK(i2c.writeCalls == 2);
+    CHECK(i2c.transactions.back().tx == std::vector<uint8_t>{0x12});
 }
 
 TEST_CASE("MstarIsp::transaction with empty rx skips the SPI read step", "[isp]") {

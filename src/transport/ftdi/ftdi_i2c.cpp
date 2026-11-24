@@ -126,17 +126,16 @@ Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
         return std::unexpected(Error{ErrorCode::DeviceNotFound, "No matching FTDI channel found"});
     }
 
-    FT_HANDLE handle = nullptr;
-    if (FT_STATUS status = I2C_OpenChannel(*chosen, &handle); status != FT_OK) {
+    // Allocate the owner before acquiring the handle. Once open succeeds,
+    // Impl owns cleanup on both initialization failure and normal destruction.
+    auto impl = std::make_unique<Impl>();
+    if (FT_STATUS status = I2C_OpenChannel(*chosen, &impl->handle); status != FT_OK) {
         return std::unexpected(ftdiError(ErrorCode::DeviceBusy, "I2C_OpenChannel", status));
     }
 
-    auto impl = std::make_unique<Impl>();
-    impl->handle = handle;
     impl->clockHz = kDefaultClockHz;
 
     if (auto result = impl->reinit(); !result) {
-        I2C_CloseChannel(handle);
         return std::unexpected(result.error());
     }
 
