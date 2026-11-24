@@ -1265,8 +1265,8 @@ Progress and remaining work (writing prioritized by the user):
    raw backups and marker checks are implemented in step 5. SPI-NOR is deferred;
    physical validation of the ECC profiles remains part of step 3.
 5. **Implement NAND erase/program/verify — implemented and offline-tested.**
-   `write` requires an explicit serial, new raw backup path and --yes (or
-   --dry-run). Validate block alignment, inspect markers, compare the backup
+   `write` selects the first detected programmer unless --serial is supplied.
+   It requires a new raw backup path and --yes (or --dry-run). Validate block alignment, inspect markers, compare the backup
    with a second raw read, erase/program full pages, and verify every byte.
    Preserve fixed addresses: marked blocks abort rather than being skipped.
    Check WEL/E-FAIL/P-FAIL, never retry ambiguous mutations, and restore flash
@@ -1391,7 +1391,7 @@ read/ECC validation remains pending; that status is tracked separately.
 
 **Status: write/verify implemented and offline-tested; hardware programming pending.**
 
-- [x] Add `write` with explicit serial, new backup path and --yes confirmation.
+- [x] Add `write` with optional serial, new backup path and --yes confirmation.
 - [x] Add --dry-run for marker checks and verified backup without erase/program.
 - [x] Validate block-aligned input/range and require repeated matching JEDEC ID.
 - [x] Back up raw main+OOB, close the files and compare against a second read.

@@ -245,6 +245,14 @@ TEST_CASE_METHOD(Fixture, "Linux selects the retained device and rejects ambigui
         CHECK(fake.openedDevice == &fake.devices[1]);
         CHECK(fake.interface == INTERFACE_A);
     }
+    SECTION("first discovered") {
+        ProgrammerSelector selector;
+        selector.firstMatch = true;
+        auto result = FtdiI2c::open(selector);
+        REQUIRE(result);
+        CHECK(fake.openedDevice == &fake.devices[0]);
+        CHECK(fake.interface == INTERFACE_A);
+    }
     SECTION("no match") {
         ProgrammerSelector selector;
         selector.location = "B"; // FT2232D channel B is UART only.

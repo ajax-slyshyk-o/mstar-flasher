@@ -20,11 +20,12 @@ struct ProgrammerInfo {
 };
 
 /// Criteria for selecting a specific programmer among several enumerated
-/// devices. Do not assume index 0 is the desired device.
+/// devices. By default, multiple matches are rejected.
 struct ProgrammerSelector {
     std::optional<std::string> serial;
     std::optional<std::string> description;
     std::optional<std::string> location;
+    bool firstMatch = false; // Select the first matching channel in discovery order.
 };
 
 } // namespace mstar

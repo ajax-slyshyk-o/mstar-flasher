@@ -275,6 +275,7 @@ Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
         if (selected) return fail(ErrorCode::InvalidArgument,
                                   "Multiple FTDI channels match; narrow the selection with --serial");
         selected = &channel;
+        if (selector.firstMatch) break;
     }
     if (!selected) return fail(ErrorCode::DeviceNotFound, "No matching MPSSE-capable FTDI channel found");
     if (auto r = impl->initialize(*selected); !r) return std::unexpected(r.error());

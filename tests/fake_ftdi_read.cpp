@@ -77,7 +77,7 @@ Result<std::vector<ProgrammerInfo>> FtdiI2c::enumerate() {
 }
 Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
     auto impl = std::make_unique<Impl>();
-    impl->scenario = selector.serial.value_or("clean");
+    impl->scenario = selector.serial.value_or(selector.firstMatch ? "write-ok" : "clean");
     if (impl->scenario.starts_with("write-")) {
         impl->model = std::make_unique<test::NandModel>();
         auto& m = *impl->model;

@@ -170,6 +170,8 @@ Marked blocks abort the operation; image addresses are not shifted.
 ./build/linux/mstar-cli verify firmware.bin --serial ggggggggA
 ```
 
+`--serial` is optional for `write`, including `--dry-run`: when omitted, the
+first detected programmer is selected. Supply it to select a specific device.
 Each write/dry-run requires a new backup path and also creates `PATH.json`.
 The backup includes spare/parity bytes and cannot be passed directly to `write`.
 Main-area programming regenerates ECC but does not preserve user OOB metadata.

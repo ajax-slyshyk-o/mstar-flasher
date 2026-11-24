@@ -120,6 +120,7 @@ Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
                 "selection with --serial"});
         }
         chosen = i;
+        if (selector.firstMatch) break;
     }
 
     if (!chosen) {

@@ -68,6 +68,7 @@ int runImage(const Options& options, bool writing) {
 
     mstar::ProgrammerSelector selector;
     if (!options.serial.empty()) selector.serial = options.serial;
+    else if (writing) selector.firstMatch = true;
     auto transport = mstar::ftdi::FtdiI2c::open(selector);
     if (!transport) { fmt::println(stderr, "Failed to open programmer: {}", transport.error().message); return 1; }
     mstar::TracingI2cMaster bus(*transport, options.trace ? &std::cerr : nullptr);
@@ -217,9 +218,10 @@ void addWriteCommands(CLI::App& app) {
             "Back up, erase, program and verify a block-aligned main-area NAND image" :
             "Compare a page-aligned main-area image with flash using ECC-checked reads");
         command->add_option("image", options->image, "Main-area image (no interleaved OOB)")->required();
-        auto* serial = command->add_option("--serial", options->serial, "Programmer serial shown by list");
+        command->add_option("--serial", options->serial, writing ?
+            "Programmer serial shown by list (default: first detected programmer)" :
+            "Programmer serial shown by list");
         if (writing) {
-            serial->required();
             command->add_option("--backup", options->backup, "New raw main+OOB backup path; also creates PATH.json")->required();
             command->add_flag("--yes", options->yes, "Confirm erasing/programming the image range");
             command->add_flag("--dry-run", options->dryRun, "Check markers and save/verify the backup without erasing/programming");

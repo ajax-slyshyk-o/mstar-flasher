@@ -27,7 +27,9 @@ block: partial blocks are rejected.
 ./build/linux/mstar-cli verify firmware.bin --serial ggggggggA --offset 0
 ```
 
-`write` requires an explicit programmer serial and a new backup path. `--yes`
+`write` uses the first detected programmer when `--serial` is omitted, including
+with `--dry-run`. Supply `--serial` to select a specific programmer. A new backup
+path is required. `--yes`
 authorizes the destructive operation; `--dry-run` stops after preflight/backup,
 even if `--yes` is also present. Both commands accept `--trace-i2c`,
 `--i2c-address`, `--i2c-clock`, and `--stay-in-isp`. The last option omits ISP

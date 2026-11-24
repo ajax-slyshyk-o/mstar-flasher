@@ -18,6 +18,8 @@ using namespace mstar;
 using mstar::ftdi::FtdiI2c;
 namespace {
 struct Fake {
+    DWORD channels = 1;
+    DWORD openedChannel = 99;
     FT_STATUS openStatus = FT_OK;
     FT_STATUS initStatus = FT_OK;
     FT_STATUS closeStatus = FT_OK;
@@ -51,14 +53,15 @@ std::string boundedString(const char* data, std::size_t capacity) {
 }
 
 extern "C" {
-FT_STATUS I2C_GetNumChannels(DWORD* count) { *count = 1; return FT_OK; }
-FT_STATUS I2C_GetChannelInfo(DWORD, FT_DEVICE_LIST_INFO_NODE* info) {
+FT_STATUS I2C_GetNumChannels(DWORD* count) { *count = fake.channels; return FT_OK; }
+FT_STATUS I2C_GetChannelInfo(DWORD index, FT_DEVICE_LIST_INFO_NODE* info) {
     *info = {};
-    std::snprintf(info->SerialNumber, sizeof(info->SerialNumber), "TESTA");
+    std::snprintf(info->SerialNumber, sizeof(info->SerialNumber), "%s", index == 0 ? "TESTA" : "SECONDA");
     std::snprintf(info->Description, sizeof(info->Description), "Test programmer A");
     return FT_OK;
 }
-FT_STATUS I2C_OpenChannel(DWORD, FT_HANDLE* handle) {
+FT_STATUS I2C_OpenChannel(DWORD index, FT_HANDLE* handle) {
+    fake.openedChannel = index;
     ++fake.opens;
     *handle = nullptr;
     if (fake.openStatus != FT_OK) return fake.openStatus;
@@ -88,6 +91,30 @@ FT_STATUS I2C_DeviceRead(FT_HANDLE, UCHAR, DWORD, UCHAR*, LPDWORD transferred, D
     *transferred = 0;
     return FT_IO_ERROR;
 }
+}
+
+TEST_CASE_METHOD(Fixture, "D2XX selects the first discovered channel when requested", "[d2xx]") {
+    fake.channels = 2;
+    ProgrammerSelector selector;
+    selector.firstMatch = true;
+    SECTION("automatic selection") {
+        auto result = FtdiI2c::open(selector);
+        REQUIRE(result);
+        CHECK(fake.openedChannel == 0);
+    }
+    SECTION("explicit serial still filters") {
+        selector.serial = "SECONDA";
+        auto result = FtdiI2c::open(selector);
+        REQUIRE(result);
+        CHECK(fake.openedChannel == 1);
+    }
+    SECTION("no programmer") {
+        fake.channels = 0;
+        auto result = FtdiI2c::open(selector);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == ErrorCode::DeviceNotFound);
+        CHECK(fake.opens == 0);
+    }
 }
 
 TEST_CASE_METHOD(Fixture, "D2XX initialization failure closes the acquired handle exactly once", "[d2xx]") {
