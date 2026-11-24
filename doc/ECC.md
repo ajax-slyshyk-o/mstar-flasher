@@ -66,9 +66,11 @@ status, configuration failures, transport errors or output failures. Setup
 failures occur before truncating the output file. Partial output is retained
 after failures during reading.
 
-No raw/ECC-off mode, OOB output, bad-block remapping, erased-page repair,
-automatic read retry, SPI-NOR support, program or erase is added here. Those
-require their own formats, policies and acceptance tests. ECC step size includes
+The `read` command remains an ECC-checked main-area reader. The subsequent
+[write workflow](WRITING.md) adds temporary raw reads for backups and marker
+checks, plus erase/program/readback verification. General OOB image support,
+bad-block remapping, erased-page repair, automatic read retry and SPI-NOR remain
+separate work. ECC step size includes
 metadata bytes on the GigaDevice parts. The table's physical OOB sizes are now
 128 bytes for GM9 and 96 bytes for W25N01KV; this does not change main-area dumps.
 
@@ -105,6 +107,8 @@ unknown profiles, OTP rejection, configuration drift, setup/restore failures,
 read failures at each transfer stage, and CLI data/exit-code behavior. Hardware
 validation remains part of blueprint step 3.
 
-Validation: Linux Debug and Release each pass all 5 CTest suites; the
-FTDI-disabled build passes all 4 suites. No hardware commands or native Windows
-build were run for this change.
+Validation at the ECC implementation commit: Linux Debug and Release each
+passed all 5 CTest suites; the FTDI-disabled build passed all 4 suites. No
+hardware commands or native Windows build were run for that change. The
+subsequent write workflow adds one CLI suite; current totals are recorded in
+[BLUEPRINT.md](BLUEPRINT.md#22-implementation-milestones).

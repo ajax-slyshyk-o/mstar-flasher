@@ -1200,7 +1200,12 @@ Use for the eventual CH341 backend.
 
 ### Current progress and next steps (2026-11-24)
 
-Implementation and hardware acceptance are tracked separately:
+Implementation and hardware acceptance are tracked separately. Current user
+priority: implement NAND writing now; SPI-NOR can wait. Intermittent initial
+connection failures also occur with the official software, according to the
+user. They remain a bench observation, not a gate on further software work.
+No hardware erase/program trial has been performed.
+
 
 - Milestone 0: project/core/test infrastructure implemented; Linux Debug and
   Release builds verified. Windows revalidation and automated CI remain open.
@@ -1212,10 +1217,11 @@ Implementation and hardware acceptance are tracked separately:
 - Milestone 4: five NAND table entries and main-area `read` with offset/size.
   SPI-NOR and evidence of two matching complete dumps remain open.
 - Milestone 5: per-chip ECC configuration/decoding/reporting implemented and
-  offline-tested; OOB and bad-block handling remain open. Milestones 6-8 are
-  not implemented.
+  offline-tested; raw backup/marker checks are implemented for writing. General
+  OOB image support and bad-block mapping remain open. Milestone 6 has an
+  offline-tested write/verify workflow; milestones 7-8 remain unimplemented.
 
-Work in this order:
+Progress and remaining work (writing prioritized by the user):
 
 1. **Make reads report failures reliably — implemented and offline-tested.**
    Abort on uncorrectable ECC by default. `--fill-on-ecc-error` explicitly enables
@@ -1237,7 +1243,7 @@ Work in this order:
    and moves. The real D2XX I2C source is compiled against test-only SDK stubs.
    Validation: Linux Debug, Release and FTDI-disabled suites pass. Native Windows
    SDK/driver validation and hardware acceptance remain pending.
-3. **Complete hardware acceptance — partial; target validation blocked.**
+3. **Complete hardware acceptance — partial; target validation pending.**
    Host USB setup passes and the original FT2232C/D enumerates on Linux.
    `--trace-i2c` is implemented for probe/read/i2c-test and offline-tested.
    Bench probes return unstable, unknown JEDEC IDs; a reserved-address negative
@@ -1255,11 +1261,19 @@ Work in this order:
    counts, threshold/max-strength events and uncorrectable pages. Invalid status
    and failed configuration/status reads abort even with --fill-on-ecc-error.
    See [ECC.md](ECC.md) for sources, API, cleanup behavior and test coverage.
-   Follow-up: OOB/bad-block support and SPI-NOR identification/reads remain
-   pending; physical validation of the ECC profiles remains part of step 3.
-5. **Add write/erase/verify only after reads and ECC are trusted — pending.**
-   Retain the backup/program/verify acceptance requirements below. UART and
-   CH341 remain later work; they do not block FT2232D read validation.
+   Follow-up: general OOB image support and bad-block remapping remain open;
+   raw backups and marker checks are implemented in step 5. SPI-NOR is deferred;
+   physical validation of the ECC profiles remains part of step 3.
+5. **Implement NAND erase/program/verify — implemented and offline-tested.**
+   `write` requires an explicit serial, new raw backup path and --yes (or
+   --dry-run). Validate block alignment, inspect markers, compare the backup
+   with a second raw read, erase/program full pages, and verify every byte.
+   Preserve fixed addresses: marked blocks abort rather than being skipped.
+   Check WEL/E-FAIL/P-FAIL, never retry ambiguous mutations, and restore flash
+   settings on failure. Standalone `verify` performs ECC-checked comparison.
+   See [WRITING.md](WRITING.md) for backup format, limits and bad-block tests.
+   Hardware programming validation and automatic raw restore remain pending.
+   SPI-NOR, UART and CH341 remain later work.
 
 Detailed completion checklists follow. Checked items have implementation or
 validation evidence; unchecked items remain pending. Offline tests do not count
@@ -1281,9 +1295,9 @@ as hardware acceptance. Commands use the current executable name, `mstar-cli`.
 
 Acceptance:
 
-- [x] Linux Debug build and tests: 5/5 CTest suites pass.
-- [x] Linux Release build and tests: 5/5 CTest suites pass.
-- [x] Linux FTDI-disabled build and tests: 4/4 CTest suites pass.
+- [x] Linux Debug build and tests: 6/6 CTest suites pass.
+- [x] Linux Release build and tests: 6/6 CTest suites pass.
+- [x] Linux FTDI-disabled build and tests: 5/5 CTest suites pass.
 - [ ] Revalidate a native Windows build and its tests with the actual SDKs.
 
 The D2XX backend is exercised on Linux using test-only SDK stubs; that does not
@@ -1351,7 +1365,7 @@ The two-dump acceptance requirement remains open.
 
 ### Milestone 5 — NAND ECC/OOB/bad-block handling
 
-**Status: per-chip ECC implemented and offline-tested; OOB/bad-block work pending.**
+**Status: ECC, raw backups and marker checks implemented; general OOB/remapping pending.**
 
 - [x] Assign explicit ECC profiles to all five supported NAND parts.
 - [x] Enable/verify ECC and per-page read mode; reject active OTP access.
@@ -1362,20 +1376,35 @@ The two-dump acceptance requirement remains open.
 - [x] Restore changed read settings on success and failure; report restoration errors.
 - [x] Test decoding, setup, restoration and CLI behavior without hardware.
 - [ ] Validate ECC behavior on physical parts after reliable target access is established.
-- [ ] Implement OOB reads and define their output format/ECC mode.
-- [ ] Implement bad-block marker detection and handling policy.
+- [x] Add ECC-off raw main+OOB backups with a documented manifest format.
+- [x] Inspect spare markers and abort writes to marked or unreadable blocks.
+- [x] Test marker detection and zero-mutation behavior with simulated NAND.
+- [ ] Validate marker detection against reference tools on hardware.
+- [ ] Add general OOB image input/output and automatic raw restore.
+- [ ] Implement explicit bad-block mapping/skipping policies if needed.
 
 See [ECC.md](ECC.md) for profiles, datasheet sources and reviewed reference
-projects. Do not add programming until reads and ECC handling are trusted.
+projects. The user authorized write-path implementation while physical
+read/ECC validation remains pending; that status is tracked separately.
 
 ### Milestone 6 — erase/write/verify
 
-**Status: pending.**
+**Status: write/verify implemented and offline-tested; hardware programming pending.**
 
-- [ ] Meet the read/ECC hardware acceptance requirements before adding programming.
-- [ ] Add destructive operations with explicit confirmation.
-- [ ] Implement the default workflow: backup, erase required blocks, program, verify.
-- [ ] Return non-zero status on verification failure.
+- [x] Add `write` with explicit serial, new backup path and --yes confirmation.
+- [x] Add --dry-run for marker checks and verified backup without erase/program.
+- [x] Validate block-aligned input/range and require repeated matching JEDEC ID.
+- [x] Back up raw main+OOB, close the files and compare against a second read.
+- [x] Erase required blocks and program full pages in ascending order.
+- [x] Check write-enable and erase/program status; never retry failed mutations.
+- [x] Verify every image byte and return non-zero on mismatch or cleanup failure.
+- [x] Add standalone `verify` and restore protection/ECC settings on exit.
+- [x] Test successful writes, marked blocks, timeouts, failed transfers and mismatches.
+- [ ] Validate a controlled write/readback on the physical target with a verified backup.
+- [ ] Add a standalone CLI erase command or automatic backup restore if needed.
+
+Current scope is fixed-address main-area images; no partial-block update,
+raw/OOB image programming or automatic bad-block remapping. See [WRITING.md](WRITING.md).
 
 ### Milestone 7 — UART console
 
@@ -1406,7 +1435,8 @@ When initializing this project:
 4. `mstar-core` must have zero dependency on FTDI or libusb.
 5. Use RAII for every FTDI/I²C handle.
 6. Use `std::expected` for recoverable errors.
-7. Do not implement flash write/erase until `probe` and `read` are complete.
+7. Keep hardware write/erase opt-in and backed up/verified. The user-authorized
+   implementation priority and pending hardware acceptance are tracked in section 22.
 8. Make protocol layers testable with `MockI2cMaster`.
 9. Write unit tests for exact MStar I²C transaction sequences before hardware testing.
 10. Do not silently ignore NACKs, short transfers, ECC errors or verify failures.

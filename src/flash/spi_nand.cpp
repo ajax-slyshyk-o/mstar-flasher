@@ -161,6 +161,23 @@ Result<void> SpiNand::configureRead(const FlashPart& part) {
 }
 
 Result<void> SpiNand::restoreReadConfiguration() {
+    auto result = restoreWriteConfiguration();
+    const auto append = [&](Result<void> cleanup, const char* operation) {
+        if (!cleanup) {
+            if (result) result = cleanup;
+            else result.error().message += std::string("; ") + operation + ": " + cleanup.error().message;
+        }
+    };
+    auto raw = restoreRawEcc();
+    append(raw, "restore raw-read ECC");
+    // The original ECC setting may be off. Keep its restoration pending until
+    // the temporary raw-read setting has been recovered and verified.
+    if (raw) append(restoreEccConfiguration(), "restore read settings");
+    else readPart_.reset();
+    return result;
+}
+
+Result<void> SpiNand::restoreEccConfiguration() {
     readPart_.reset();
     if (!changedConfigMask_) return {};
     auto value = getFeature(kFeatureAddressConfig);
@@ -237,13 +254,7 @@ Result<EccReport> SpiNand::readPage(uint32_t pageIndex, std::span<uint8_t> pageB
         return std::unexpected(Error{ErrorCode::InvalidArgument,
             "readPage buffer size or page index does not match flash geometry"});
     }
-    auto config = getFeature(kFeatureAddressConfig);
-    if (!config) return std::unexpected(config.error());
-    const uint8_t required = readConfig(readPart_->eccProfile)->required;
-    if ((*config & (required | kOtpEnable)) != required) {
-        return std::unexpected(Error{ErrorCode::FlashProtocol,
-            "SPI-NAND ECC/read configuration changed; refusing unchecked page data"});
-    }
+    if (auto result = checkReadConfiguration(); !result) return std::unexpected(result.error());
 
     std::array<uint8_t, 4> pageReadTx{
         kPageRead,
@@ -265,6 +276,19 @@ Result<EccReport> SpiNand::readPage(uint32_t pageIndex, std::span<uint8_t> pageB
         return std::unexpected(result.error());
     }
     return ecc;
+}
+
+Result<void> SpiNand::checkReadConfiguration() {
+    if (!readPart_ || rawEccPending_)
+        return std::unexpected(Error{ErrorCode::FlashProtocol, "SPI-NAND read configuration is not ready"});
+    auto config = getFeature(kFeatureAddressConfig);
+    if (!config) return std::unexpected(config.error());
+    const uint8_t required = readConfig(readPart_->eccProfile)->required;
+    if ((*config & (required | kOtpEnable)) != required) {
+        return std::unexpected(Error{ErrorCode::FlashProtocol,
+            "SPI-NAND ECC/read configuration changed; refusing unchecked page data"});
+    }
+    return {};
 }
 
 } // namespace mstar

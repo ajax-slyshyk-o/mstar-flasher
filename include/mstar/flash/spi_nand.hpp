@@ -22,8 +22,8 @@ struct EccReport {
     uint8_t correctedBitsMax = 0;
 };
 
-/// SPI-NAND identification and ECC-checked main-area reads. OOB, bad-block
-/// mapping, program and erase remain separate work. See doc/ECC.md for profiles.
+/// SPI-NAND reads and block/page programming. No bad-block remapping or OTP
+/// programming. See doc/ECC.md and doc/WRITING.md for supported profiles.
 class SpiNand {
 public:
     explicit SpiNand(SpiBus& bus);
@@ -63,16 +63,47 @@ public:
         std::span<uint8_t> pageBuffer
     );
 
+    /// ECC-off main+physical-spare data for backups. Restores ECC even on error.
+    Result<void> readRawPage(uint32_t pageIndex, std::span<uint8_t> buffer);
+    /// Inspect spare markers on the first two pages; never mark or remap blocks.
+    Result<bool> isBadBlock(uint32_t blockIndex);
+
+    /// Requires configureRead; temporarily removes volatile block protection.
+    /// restoreReadConfiguration also restores protection and disables writes.
+    Result<void> configureWrite();
+    Result<void> eraseBlock(uint32_t blockIndex);
+    /// Full pages, ascending order, in the most recently erased block only.
+    Result<void> programPage(uint32_t pageIndex, std::span<const uint8_t> data);
+    Result<EccReport> verifyPage(uint32_t pageIndex, std::span<const uint8_t> expected);
+
 private:
     SpiBus* bus_;
     std::optional<FlashPart> readPart_;
     uint8_t originalConfig_ = 0;
     uint8_t changedConfigMask_ = 0;
     uint8_t configWriteMask_ = 0xFF;
+    bool rawEccPending_ = false;
+    bool writeConfigured_ = false;
+    bool writeTouched_ = false;
+    uint8_t originalProtection_ = 0;
+    uint8_t changedProtectionMask_ = 0;
+    uint8_t protectionMask_ = 0;
+    uint8_t protectionWriteMask_ = 0xFF;
+    std::optional<uint32_t> nextProgramPage_;
+    uint32_t programEndPage_ = 0;
 
     Result<uint8_t> getFeature(uint8_t featureAddress);
     Result<void> setFeature(uint8_t featureAddress, uint8_t value);
     Result<EccReport> decodeEcc(uint8_t status, uint32_t pageIndex);
+    Result<void> checkReadConfiguration();
+    Result<void> restoreEccConfiguration();
+    Result<void> restoreRawEcc();
+    Result<void> restoreWriteConfiguration();
+    Result<void> readRawSlice(uint32_t pageIndex, uint16_t column, std::span<uint8_t> data);
+    Result<void> checkWriteConfiguration();
+    Result<void> writeEnable();
+    Result<void> writeDisable();
+    Result<void> finishMutation(Result<void> result);
 
     /// Polls the status feature register until the operation-in-progress
     /// bit clears. Returns the final status byte, or ErrorCode::Timeout

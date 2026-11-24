@@ -5,9 +5,14 @@
 #include <algorithm>
 #include <string>
 #include <utility>
+#include <fmt/format.h>
+#include "nand_model.hpp"
 
 namespace mstar::ftdi {
 struct FtdiI2c::Impl {
+    std::unique_ptr<test::NandModel> model;
+    std::vector<uint8_t> pending;
+    bool executed = false;
     std::string scenario;
     uint8_t opcode = 0;
     uint8_t featureAddress = 0;
@@ -59,7 +64,13 @@ struct FtdiI2c::Impl {
 FtdiI2c::FtdiI2c(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 FtdiI2c::FtdiI2c(FtdiI2c&&) noexcept = default;
 FtdiI2c& FtdiI2c::operator=(FtdiI2c&&) noexcept = default;
-FtdiI2c::~FtdiI2c() = default;
+FtdiI2c::~FtdiI2c() {
+    if (impl_ && impl_->model) {
+        const auto& m = *impl_->model;
+        fmt::println(stderr, "MODEL erases={} programs={} config={:02X} protection={:02X} wel={}",
+                     m.erases, m.programs, m.config, m.protection, m.wel ? 1 : 0);
+    }
+}
 
 Result<std::vector<ProgrammerInfo>> FtdiI2c::enumerate() {
     return std::vector<ProgrammerInfo>{};
@@ -67,6 +78,33 @@ Result<std::vector<ProgrammerInfo>> FtdiI2c::enumerate() {
 Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
     auto impl = std::make_unique<Impl>();
     impl->scenario = selector.serial.value_or("clean");
+    if (impl->scenario.starts_with("write-")) {
+        impl->model = std::make_unique<test::NandModel>();
+        auto& m = *impl->model;
+        const auto& s = impl->scenario;
+        if (s == "write-gv") m.select(NandEccProfile::W25n01gv);
+        if (s == "write-bad-first") m.mark(0);
+        if (s == "write-bad-second") m.mark(0, 1);
+        if (s == "write-marker-error") m.failOpcode = 0x03;
+        if (s == "write-wel") m.ignoreWren = true;
+        if (s == "write-protected") m.ignoreUnlock = true;
+        if (s == "write-erase-fail") m.failErase = true;
+        if (s == "write-program-fail") m.failProgram = true;
+        if (s == "write-mismatch") m.corruptVerify = true;
+        if (s == "write-restore-fail") m.ignoreProtectionRestore = true;
+        if (s == "write-raw-restore-fail") m.failRawRestore = true;
+        if (s == "write-backup-drift") m.backupDrift = true;
+        if (s == "write-backup-ecc") m.uncorrectable = true;
+        if (s == "write-load-error") m.failOpcode = 0x02;
+        if (s == "write-execute-error") { m.failOpcode = 0x10; m.failureAfterEffect = true; }
+        if (s == "write-preloaded") {
+            for (uint32_t p = 0; p < 64; ++p) {
+                auto data = m.contents(p);
+                std::fill_n(data.begin(), m.part.geometry.pageSize, 0x41);
+                m.storage[p] = std::move(data);
+            }
+        }
+    }
     if (impl->scenario.starts_with("gv-") || impl->scenario.starts_with("kv-") ||
         impl->scenario == "gm9-corrected") impl->config = 0x18;
     if (impl->scenario == "config-disabled" || impl->scenario == "config-ignored" ||
@@ -76,6 +114,16 @@ Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
 }
 Result<void> FtdiI2c::setClock(uint32_t) { return {}; }
 Result<void> FtdiI2c::write(uint8_t, std::span<const uint8_t> data) {
+    if (impl_->model) {
+        if (data.size() >= 2 && data[0] == 0x10) {
+            impl_->pending.assign(data.begin() + 1, data.end());
+            impl_->executed = false;
+        } else if (data.size() == 1 && data[0] == 0x12 && !impl_->executed && !impl_->pending.empty()) {
+            impl_->executed = true;
+            return impl_->model->transaction(impl_->pending, {});
+        }
+        return {};
+    }
     if (data.size() >= 2 && data[0] == 0x10) {
         impl_->opcode = data[1];
         if (impl_->opcode == 0x0F && data.size() == 3) impl_->featureAddress = data[2];
@@ -105,6 +153,10 @@ Result<void> FtdiI2c::read(uint8_t, std::span<uint8_t> data) {
     return impl_->reply(data);
 }
 Result<void> FtdiI2c::writeRead(uint8_t, std::span<const uint8_t>, std::span<uint8_t> rx) {
+    if (impl_->model) {
+        impl_->executed = true;
+        return impl_->model->transaction(impl_->pending, rx);
+    }
     return impl_->reply(rx);
 }
 } // namespace mstar::ftdi

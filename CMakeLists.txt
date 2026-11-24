@@ -28,6 +28,7 @@ add_library(mstar-core
     src/isp/mstar_isp.cpp
     src/flash/flash_table.cpp
     src/flash/spi_nand.cpp
+    src/flash/spi_nand_write.cpp
     src/transport/tracing_i2c.cpp
 )
 target_include_directories(mstar-core PUBLIC include)
@@ -38,7 +39,7 @@ target_link_libraries(mstar-core PUBLIC
     nlohmann_json::nlohmann_json 
     serdepp::serdepp)
 
-add_executable(mstar-cli src/app/main.cpp)
+add_executable(mstar-cli src/app/main.cpp src/app/write_commands.cpp)
 target_link_libraries(mstar-cli PRIVATE mstar-core CLI11::CLI11)
 
 if(MSTAR_ENABLE_FTDI)
@@ -85,6 +86,7 @@ if(MSTAR_BUILD_TESTS)
     add_executable(mstar-tests
         tests/test_mstar_isp.cpp
         tests/test_spi_nand.cpp
+        tests/test_spi_nand_write.cpp
         tests/test_tracing_i2c.cpp
     )
     target_link_libraries(mstar-tests PRIVATE mstar-core Catch2::Catch2WithMain)
@@ -102,7 +104,7 @@ if(MSTAR_BUILD_TESTS)
 
     # Exercise real CLI parsing, exit codes and file I/O with a fake programmer.
     # This target never links the hardware backend, even in FTDI-enabled builds.
-    add_executable(mstar-cli-read-tests src/app/main.cpp tests/fake_ftdi_read.cpp)
+    add_executable(mstar-cli-read-tests src/app/main.cpp src/app/write_commands.cpp tests/fake_ftdi_read.cpp)
     target_compile_definitions(mstar-cli-read-tests PRIVATE MSTAR_ENABLE_FTDI)
     target_link_libraries(mstar-cli-read-tests PRIVATE mstar-core CLI11::CLI11)
     add_test(NAME mstar-read-cli
@@ -110,6 +112,11 @@ if(MSTAR_BUILD_TESTS)
             "-DEXE=$<TARGET_FILE:mstar-cli-read-tests>"
             "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/read-cli-tests"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_read_cli.cmake")
+    add_test(NAME mstar-write-cli
+        COMMAND "${CMAKE_COMMAND}"
+            "-DEXE=$<TARGET_FILE:mstar-cli-read-tests>"
+            "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/write-cli-tests"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_write_cli.cmake")
 
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME mstar-linux-setup

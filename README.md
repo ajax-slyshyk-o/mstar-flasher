@@ -154,7 +154,28 @@ reports corrected-bit counts or ranges and an ECC summary. The threshold count
 is a subset of corrected pages: Winbond KV reports a configurable threshold;
 GigaDevice and W25N01GV report correction at their maximum strength.
 See [ECC profiles and sources](doc/ECC.md) for supported parts and limitations.
-OOB/bad-block support and SPI-NOR reads remain pending.
+Raw backups and marker checks are available in the write workflow below.
+General OOB image handling, bad-block remapping, and SPI-NOR reads remain pending.
+
+## Writing and verifying a NAND image
+
+`write` accepts a main-area image with block-aligned size and offset. It checks
+bad-block markers, saves and compares a raw main+OOB backup, erases/programs the
+requested blocks, and verifies every image byte through ECC-checked reads.
+Marked blocks abort the operation; image addresses are not shifted.
+
+```console
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA --backup before-test.raw --dry-run
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA --backup before-write.raw --yes
+./build/linux/mstar-cli verify firmware.bin --serial ggggggggA
+```
+
+Each write/dry-run requires a new backup path and also creates `PATH.json`.
+The backup includes spare/parity bytes and cannot be passed directly to `write`.
+Main-area programming regenerates ECC but does not preserve user OOB metadata.
+The implementation is offline-tested; no programming trial has been performed
+on the connected board. See [writing and bad-block testing](doc/WRITING.md) for
+the workflow, backup format and limits.
 
 ## Linux release archive
 

@@ -9,6 +9,7 @@
 
 #include <CLI/CLI.hpp>
 #include <fmt/format.h>
+#include "write_commands.hpp"
 
 #include "mstar/flash/flash_table.hpp"
 #include "mstar/flash/spi_nand.hpp"
@@ -487,6 +488,7 @@ int main(int argc, char** argv) {
                              i2cTestClockHz, testTraceI2c));
     });
 
+    addWriteCommands(app);
     CLI11_PARSE(app, argc, argv);
     return 0;
 }
