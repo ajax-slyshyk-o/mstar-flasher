@@ -1205,7 +1205,8 @@ Implementation and hardware acceptance are tracked separately:
 - Milestone 0: project/core/test infrastructure implemented; Linux Debug and
   Release builds verified. Windows revalidation and automated CI remain open.
 - Milestone 1: `list` detects the original FT2232C/D; USB permissions are needed
-  for serial/description access. Linux setup and release packaging are available.
+  for serial/description access and are configured on this host. Linux setup
+  and release packaging are available.
 - Milestones 2-3: FTDI I2C, MStar ISP and `probe` implemented, with offline
   protocol/backend tests. Linux logic-analyzer and target validation remain open.
 - Milestone 4: five NAND table entries and main-area `read` with offset/size.
@@ -1224,7 +1225,7 @@ Work in this order:
    output with an explicit incomplete-file diagnostic. Cover behavior using the
    real CLI with a fake programmer and failing output devices, without hardware.
    Validation: Linux Debug, Release and FTDI-disabled test suites pass. Hardware
-   acceptance and vendor-specific ECC interpretation remain steps 3 and 4.
+   acceptance remains step 3; per-chip ECC is implemented in step 4.
 2. **Fix error-path cleanup — implemented and offline-tested.**
    ISP transactions attempt SPI_END once after success or a transfer failure,
    without replaying the payload. The original error code/message is preserved;
@@ -1260,128 +1261,138 @@ Work in this order:
    Retain the backup/program/verify acceptance requirements below. UART and
    CH341 remain later work; they do not block FT2232D read validation.
 
-The original milestone definitions and acceptance criteria follow.
+Detailed completion checklists follow. Checked items have implementation or
+validation evidence; unchecked items remain pending. Offline tests do not count
+as hardware acceptance. Commands use the current executable name, `mstar-cli`.
 
 ### Milestone 0 — project skeleton
 
-Copilot should:
+**Status: implementation mostly complete; CI and native Windows validation pending.**
 
-1. Generate the directory structure.
-2. Create `mstar-core`.
-3. Define `Result`, `Error`, `I2cMaster` and `SpiBus`.
-4. Create `MockI2cMaster`.
-5. Configure Catch2.
-6. Configure CLI11.
-7. Add Windows/Linux CMake presets.
-8. Make CI build without FTDI libraries.
+- [x] Generate the directory structure.
+- [x] Create hardware-independent `mstar-core`.
+- [x] Define `Result`, `Error`, `I2cMaster` and `SpiBus`.
+- [x] Create `MockI2cMaster` and `MockSpiBus`.
+- [x] Configure Catch2.
+- [x] Configure CLI11.
+- [x] Add Windows/Linux CMake presets.
+- [x] Support a local build without FTDI libraries.
+- [ ] Automate the FTDI-disabled build in CI.
 
-Acceptance condition:
+Acceptance:
 
-```text
-Windows build: PASS
-Linux build: PASS
-unit tests: PASS
-hardware code: not required
-```
+- [x] Linux Debug build and tests: 5/5 CTest suites pass.
+- [x] Linux Release build and tests: 5/5 CTest suites pass.
+- [x] Linux FTDI-disabled build and tests: 4/4 CTest suites pass.
+- [ ] Revalidate a native Windows build and its tests with the actual SDKs.
+
+The D2XX backend is exercised on Linux using test-only SDK stubs; that does not
+establish native Windows SDK/driver compatibility. Hardware is not required for
+this milestone.
 
 ### Milestone 1 — FTDI discovery
 
-Implement:
+**Status: complete for the original programmer on Linux.**
 
-```console
-mstar-flasher list
-```
+- [x] Implement `mstar-cli list`.
+- [x] Enumerate the original FT2232C/D programmer on the host.
+- [x] Display serial, description and channel.
+- [x] Check Linux USB permissions and udev setup.
 
-Acceptance condition:
-
-```text
-original FT2232D programmer is enumerated
-serial/description/channel are displayed
-```
+Hardware evidence: `Mstar USB Debug Tool A`, serial `ggggggggA`, channel A,
+USB location `1:11` during the session. See [HARDWARE.md](HARDWARE.md).
+Native Windows validation remains pending under milestone 0.
 
 ### Milestone 2 — FTDI I²C
 
-Implement `FtdiI2c`.
+**Status: implemented and offline-tested; electrical acceptance pending.**
 
-Acceptance condition:
+- [x] Implement `FtdiI2c` using libftdi1/libusb on Linux and D2XX/LibMPSSE on Windows.
+- [x] Exercise transfer sequences and error paths with fake backend APIs.
+- [x] Add `mstar-cli i2c-test` and `--trace-i2c` for bench diagnostics.
+- [ ] Verify START/address/data/STOP and repeated START on a logic analyzer.
+- [ ] Confirm a genuine target ACK at `0x49` and a NACK for the negative control.
 
-```text
-START/address/data/STOP verified on logic analyzer
-0x49 ACK observed
-```
+The software reported ACKs at both `0x49` and reserved address `0x7f`; this is
+not reliable ACK evidence. No logic analyzer was connected. See
+[HARDWARE.md](HARDWARE.md) for the failed checks and remaining procedure.
 
 ### Milestone 3 — MStar ISP + JEDEC ID
 
-Implement `MstarIsp`.
+**Status: implemented and offline-tested; target acceptance pending.**
 
-Acceptance condition:
+- [x] Implement `MstarIsp` activation, SPI write/read/end and ISP exit.
+- [x] Implement `mstar-cli probe` with SPI `0x9F` identification.
+- [x] Test command sequences, error propagation and SPI_END cleanup.
+- [x] Keep probing free of flash program/erase operations.
+- [ ] Confirm that the real target enters MStar ISP.
+- [ ] Read a stable, valid JEDEC ID matching the connected flash.
 
-```console
-mstar-flasher probe
-```
-
-successfully:
-
-```text
-enters MStar ISP
-sends SPI 0x9F
-reads flash JEDEC ID
-```
-
-No flash modification.
+Bench probes returned unstable, unknown IDs, including after a coordinated
+power cycle. A pre-Linux boot state could not be confirmed. A successful
+transport return or `ISP activation: OK` message does not satisfy acceptance.
 
 ### Milestone 4 — flash identification and read
 
-Implement enough SPI-NAND/SPI-NOR support to identify the connected flash and read data.
+**Status: SPI-NAND main-area reads implemented; SPI-NOR and hardware acceptance pending.**
 
-Add:
+- [x] Add five SPI-NAND table entries and identification by JEDEC ID.
+- [x] Implement `mstar-cli read backup.bin` for the NAND main area.
+- [x] Support byte offset/size and validate ranges without overflow.
+- [x] Report read/output failures and retain incomplete files with diagnostics.
+- [x] Make ECC substitution opt-in with `--fill-on-ecc-error` and exit code 2.
+- [x] Test CLI output data, errors and exit codes using a fake programmer.
+- [ ] Implement SPI-NOR identification and reads.
+- [ ] Identify the actual connected flash and confirm its geometry.
+- [ ] Produce two complete dumps of the expected size that compare identical.
 
-```console
-mstar-flasher read backup.bin
-```
-
-Acceptance condition:
-
-```text
-two complete reads produce identical files
-```
+No hardware dump has been attempted because target communication is unreliable.
+The two-dump acceptance requirement remains open.
 
 ### Milestone 5 — NAND ECC/OOB/bad-block handling
 
-Implement robust NAND status interpretation.
+**Status: per-chip ECC implemented and offline-tested; OOB/bad-block work pending.**
 
-Do not add programming until reads and ECC handling are trusted.
+- [x] Assign explicit ECC profiles to all five supported NAND parts.
+- [x] Enable/verify ECC and per-page read mode; reject active OTP access.
+- [x] Recheck read configuration before each page.
+- [x] Decode per-chip primary/extended status and corrected-bit counts or ranges.
+- [x] Report clean, corrected, threshold/max-strength and uncorrectable pages.
+- [x] Abort on invalid status or configuration/transport failures, including in recovery mode.
+- [x] Restore changed read settings on success and failure; report restoration errors.
+- [x] Test decoding, setup, restoration and CLI behavior without hardware.
+- [ ] Validate ECC behavior on physical parts after reliable target access is established.
+- [ ] Implement OOB reads and define their output format/ECC mode.
+- [ ] Implement bad-block marker detection and handling policy.
+
+See [ECC.md](ECC.md) for profiles, datasheet sources and reviewed reference
+projects. Do not add programming until reads and ECC handling are trusted.
 
 ### Milestone 6 — erase/write/verify
 
-Add destructive operations with explicit confirmation.
+**Status: pending.**
 
-Default workflow:
-
-```text
-backup
-erase required blocks
-program
-verify
-```
-
-Verification failure must return non-zero exit status.
+- [ ] Meet the read/ECC hardware acceptance requirements before adding programming.
+- [ ] Add destructive operations with explicit confirmation.
+- [ ] Implement the default workflow: backup, erase required blocks, program, verify.
+- [ ] Return non-zero status on verification failure.
 
 ### Milestone 7 — UART console
 
-Reverse-engineer FT2232D channel B and the 74HC08 routing.
+**Status: pending; interfaces/stubs only.**
 
-Add:
-
-```console
-mstar-flasher console
-```
+- [ ] Reverse-engineer FT2232D channel B and the 74HC08 routing.
+- [ ] Implement the UART transport.
+- [ ] Add `mstar-cli console` and validate it on hardware.
 
 ### Milestone 8 — CH341
 
-Implement `Ch341I2c` using libusb.
+**Status: pending.**
 
-No MStar/NAND layer changes should be required.
+- [ ] Implement `Ch341I2c` using libusb.
+- [ ] Integrate and validate it without changing the MStar/NAND layers.
+
+The CMake option currently rejects enabling CH341 because no backend exists.
 
 ---
 
