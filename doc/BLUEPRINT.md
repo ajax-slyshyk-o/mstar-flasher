@@ -1198,6 +1198,51 @@ Use for the eventual CH341 backend.
 
 # 22. Implementation milestones
 
+## Current progress and next steps (2026-11-24)
+
+Implementation and hardware acceptance are tracked separately:
+
+- Milestone 0: project/core/test infrastructure implemented; Linux Debug and
+  Release builds verified. Windows revalidation and automated CI remain open.
+- Milestone 1: `list` detects the original FT2232C/D; USB permissions are needed
+  for serial/description access. Linux setup and release packaging are available.
+- Milestones 2-3: FTDI I2C, MStar ISP and `probe` implemented, with offline
+  protocol/backend tests. Linux logic-analyzer and target validation remain open.
+- Milestone 4: five NAND table entries and main-area `read` with offset/size.
+  SPI-NOR and evidence of two matching complete dumps remain open.
+- Milestone 5: basic ECC error detection only; per-chip ECC, OOB and bad-block
+  handling remain open. Milestones 6-8 are not implemented.
+
+Work in this order:
+
+1. **Make reads report failures reliably — implemented and offline-tested.**
+   Abort on uncorrectable ECC by default. `--fill-on-ecc-error` explicitly enables
+   0xFF placeholders and continuation. Exit codes: 0 = clean dump, 1 = aborted
+   read or output error, 2 = completed recovery dump containing substituted pages.
+   Check writes, flush and close; reject overflowing ranges. Keep any partial
+   output with an explicit incomplete-file diagnostic. Cover behavior using the
+   real CLI with a fake programmer and failing output devices, without hardware.
+   Validation: Linux Debug, Release and FTDI-disabled test suites pass. Hardware
+   acceptance and vendor-specific ECC interpretation remain steps 3 and 4.
+2. **Fix error-path cleanup — pending.**
+   Attempt SPI_END after failed ISP transactions without hiding the original
+   failure. Fix the Windows FTDI initialization path closing a handle twice.
+   Add failure-injection tests for these cleanup paths.
+3. **Complete hardware acceptance — pending.**
+   Check/apply host USB setup, verify START/address/ACK/STOP and repeated START
+   on a logic analyzer, identify the actual target, then compare two complete
+   dumps. Record wiring, chip IDs, commands and results in `doc/HARDWARE.md`.
+   Add `--trace-i2c` (section 12) to help correlate commands with captures.
+4. **Implement per-chip ECC handling — pending.**
+   Replace the shared GD5F2GM7 ECC interpretation with verified part-specific
+   behavior and check/configure ECC state. Add corrected/threshold/uncorrectable
+   reporting, then OOB/bad-block support and SPI-NOR identification/reads.
+5. **Add write/erase/verify only after reads and ECC are trusted — pending.**
+   Retain the backup/program/verify acceptance requirements below. UART and
+   CH341 remain later work; they do not block FT2232D read validation.
+
+The original milestone definitions and acceptance criteria follow.
+
 ## Milestone 0 — project skeleton
 
 Copilot should:

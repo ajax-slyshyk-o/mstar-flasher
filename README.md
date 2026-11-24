@@ -100,6 +100,31 @@ cmake --preset windows -DMSTAR_ENABLE_FTDI=ON \
   -DLIBMPSSE_ROOT=C:/SDK/FTDI/LibMPSSE
 ```
 
+## Reading a NAND dump
+
+```console
+./build/linux/mstar-cli read backup.bin
+./build/linux/mstar-cli read region.bin --offset 0x1000 --size 0x10000
+```
+
+Reads stop on the first uncorrectable ECC error by default. To continue with
+`0xFF` placeholders for affected pages, explicitly request a recovery dump:
+
+```console
+./build/linux/mstar-cli read recovery.bin --fill-on-ecc-error
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The requested range was read and the output file was written successfully. |
+| `1` | The operation failed (read, range, open, write, flush or close error). |
+| `2` | Recovery completed, but some pages were replaced with `0xFF`; data was lost. |
+
+Each replaced page is reported on stderr. On failure, any partial output is
+retained with an incomplete-file diagnostic; it must not be treated as a complete
+backup. Existing output files are overwritten. Current ECC interpretation is
+still limited; see the next steps in [the blueprint](doc/BLUEPRINT.md#current-progress-and-next-steps-2026-11-24).
+
 ## Linux release archive
 
 ```console

@@ -90,6 +90,17 @@ if(MSTAR_BUILD_TESTS)
 
     add_test(NAME mstar-tests COMMAND mstar-tests)
 
+    # Exercise real CLI parsing, exit codes and file I/O with a fake programmer.
+    # This target never links the hardware backend, even in FTDI-enabled builds.
+    add_executable(mstar-cli-read-tests src/app/main.cpp tests/fake_ftdi_read.cpp)
+    target_compile_definitions(mstar-cli-read-tests PRIVATE MSTAR_ENABLE_FTDI)
+    target_link_libraries(mstar-cli-read-tests PRIVATE mstar-core CLI11::CLI11)
+    add_test(NAME mstar-read-cli
+        COMMAND "${CMAKE_COMMAND}"
+            "-DEXE=$<TARGET_FILE:mstar-cli-read-tests>"
+            "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/read-cli-tests"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_read_cli.cmake")
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME mstar-linux-setup
             COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_setup_linux.sh")

@@ -159,7 +159,8 @@ int runRead(
     const std::string& outputPath,
     uint64_t offset,
     uint64_t size,
-    bool stayInIsp
+    bool stayInIsp,
+    bool fillOnEccError
 ) {
 #ifdef MSTAR_ENABLE_FTDI
     mstar::ProgrammerSelector selector;
@@ -221,10 +222,10 @@ int runRead(
     }
 
     uint64_t readSize = (size == 0) ? (flashBytes - offset) : size;
-    if (offset + readSize > flashBytes) {
+    if (readSize > flashBytes - offset) {
         fmt::println(
-            stderr, "Requested range [{:#x}, {:#x}) exceeds the flash size ({} bytes)", offset,
-            offset + readSize, flashBytes);
+            stderr, "Requested size {} at offset {:#x} exceeds the flash size ({} bytes)",
+            readSize, offset, flashBytes);
         maybeLeaveIsp();
         return 1;
     }
@@ -250,12 +251,19 @@ int runRead(
     for (uint64_t page = startPage; readSize > 0 && page <= endPage && !fatalError; ++page) {
         auto readResult = nand.readPage(static_cast<uint32_t>(page), part->geometry, pageBuffer);
         if (!readResult) {
-            if (readResult.error().code == mstar::ErrorCode::EccUncorrectable) {
+            if (readResult.error().code == mstar::ErrorCode::EccUncorrectable && fillOnEccError) {
                 ++badPages;
                 std::fill(pageBuffer.begin(), pageBuffer.end(), 0xFF);
+                fmt::println(stderr, "Warning: page {} has uncorrectable ECC; filling with 0xFF",
+                             page);
             } else {
                 fmt::println(stderr, "Read failed at page {}: {}", page,
                               readResult.error().message);
+                if (readResult.error().code == mstar::ErrorCode::EccUncorrectable) {
+                    fmt::println(stderr,
+                        "Use --fill-on-ecc-error to continue with 0xFF placeholders "
+                        "(recovery dumps return exit code 2).");
+                }
                 fatalError = true;
                 break;
             }
@@ -266,23 +274,41 @@ int runRead(
         uint64_t sliceEnd = std::min(offset + readSize, pageStartByte + pageSize) - pageStartByte;
         out.write(reinterpret_cast<const char*>(pageBuffer.data() + sliceStart),
                    static_cast<std::streamsize>(sliceEnd - sliceStart));
+        if (!out) {
+            fmt::println(stderr, "Failed to write output file {} at flash page {}", outputPath,
+                         page);
+            fatalError = true;
+        }
     }
 
+    // Buffered writes can appear successful until flush/close (e.g. disk full).
+    // Always close, even after a read/write failure, and preserve the first error.
+    out.flush();
+    if (!out && !fatalError) {
+        fmt::println(stderr, "Failed to flush output file: {}", outputPath);
+        fatalError = true;
+    }
     out.close();
+    if (!out && !fatalError) {
+        fmt::println(stderr, "Failed to close output file: {}", outputPath);
+        fatalError = true;
+    }
 
     maybeLeaveIsp();
 
     if (fatalError) {
+        fmt::println(stderr, "Read failed; output file {} may be incomplete.", outputPath);
         return 1;
     }
 
+    if (badPages > 0) {
+        fmt::println(stderr,
+            "Recovery dump saved to {} ({} bytes): {} page(s) filled with 0xFF; "
+            "data was lost (exit code 2).", outputPath, readSize, badPages);
+        return 2;
+    }
     fmt::println("Read {} bytes at offset {:#x} ({} pages) to {}", readSize, offset, pagesRead,
                   outputPath);
-    if (badPages > 0) {
-        fmt::println(
-            "Warning: {} page(s) had uncorrectable ECC errors and were filled with 0xFF",
-            badPages);
-    }
     return 0;
 #else
     (void)serial;
@@ -292,6 +318,7 @@ int runRead(
     (void)offset;
     (void)size;
     (void)stayInIsp;
+    (void)fillOnEccError;
     fmt::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
@@ -372,6 +399,7 @@ int main(int argc, char** argv) {
     static uint64_t readOffset = 0;
     static uint64_t readSize = 0;
     static bool readStayInIsp = false;
+    static bool readFillOnEccError = false;
     read->add_option("output", readOutputPath, "Output file path")->required();
     read->add_option("--serial", readSerial, "Select programmer by serial number");
     read->add_option("--i2c-address", readIspAddress, "MStar ISP I2C address")->default_val(0x49);
@@ -380,6 +408,9 @@ int main(int argc, char** argv) {
         ->default_val(0);
     read->add_option("--size", readSize, "Number of bytes to read (default: to end of flash)")
         ->default_val(0);
+    read->add_flag("--fill-on-ecc-error", readFillOnEccError,
+        "Continue after uncorrectable ECC, filling affected pages with 0xFF; "
+        "returns exit code 2 if any page was replaced");
     read->add_flag(
         "--stay-in-isp", readStayInIsp,
         "Don't release the target when done; keeps it halted so a following "
@@ -387,7 +418,7 @@ int main(int argc, char** argv) {
     read->callback([] {
         std::exit(runRead(
             readSerial, static_cast<uint8_t>(readIspAddress), readI2cClockHz, readOutputPath,
-            readOffset, readSize, readStayInIsp));
+            readOffset, readSize, readStayInIsp, readFillOnEccError));
     });
 
     auto* i2cTest = app.add_subcommand(
