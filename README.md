@@ -140,8 +140,21 @@ Reads stop on the first uncorrectable ECC error by default. To continue with
 
 Each replaced page is reported on stderr. On failure, any partial output is
 retained with an incomplete-file diagnostic; it must not be treated as a complete
-backup. Existing output files are overwritten. Current ECC interpretation is
-still limited; see the next steps in [the blueprint](doc/BLUEPRINT.md#current-progress-and-next-steps-2026-11-24).
+backup. Existing output files are overwritten after identification, range checks
+and ECC configuration succeed.
+
+Reads enable and verify internal ECC and the chip's per-page read mode, then
+restore settings changed by the command, including on failure and with
+`--stay-in-isp`. Configuration is checked before every page. Unknown ECC profiles,
+inconsistent status, and configuration/transport failures abort with exit code 1;
+`--fill-on-ecc-error` only substitutes confirmed uncorrectable pages.
+
+Corrected pages are returned normally (exit 0 if the operation succeeds). Stderr
+reports corrected-bit counts or ranges and an ECC summary. The threshold count
+is a subset of corrected pages: Winbond KV reports a configurable threshold;
+GigaDevice and W25N01GV report correction at their maximum strength.
+See [ECC profiles and sources](doc/ECC.md) for supported parts and limitations.
+OOB/bad-block support and SPI-NOR reads remain pending.
 
 ## Linux release archive
 

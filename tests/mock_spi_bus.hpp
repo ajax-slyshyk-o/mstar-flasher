@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -25,7 +26,7 @@ struct RecordedSpiTransaction {
 class MockSpiBus final : public SpiBus {
 public:
     Result<void> transaction(std::span<const uint8_t> tx, std::span<uint8_t> rx) override {
-        if (failNextTransaction) {
+        if (failNextTransaction || failTransactionAt == transactions.size()) {
             failNextTransaction = false;
             transactions.push_back(
                 RecordedSpiTransaction{std::vector<uint8_t>(tx.begin(), tx.end()), {}});
@@ -44,9 +45,11 @@ public:
     void queueResponse(std::vector<uint8_t> bytes) {
         responseQueue.push_back(std::move(bytes));
     }
+    void clearResponses() { responseQueue.clear(); }
 
     std::vector<RecordedSpiTransaction> transactions;
     bool failNextTransaction = false;
+    std::optional<size_t> failTransactionAt;
 
 private:
     void fillFromQueue(std::span<uint8_t> out) {

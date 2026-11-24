@@ -1210,8 +1210,9 @@ Implementation and hardware acceptance are tracked separately:
   protocol/backend tests. Linux logic-analyzer and target validation remain open.
 - Milestone 4: five NAND table entries and main-area `read` with offset/size.
   SPI-NOR and evidence of two matching complete dumps remain open.
-- Milestone 5: basic ECC error detection only; per-chip ECC, OOB and bad-block
-  handling remain open. Milestones 6-8 are not implemented.
+- Milestone 5: per-chip ECC configuration/decoding/reporting implemented and
+  offline-tested; OOB and bad-block handling remain open. Milestones 6-8 are
+  not implemented.
 
 Work in this order:
 
@@ -1246,10 +1247,15 @@ Work in this order:
    [HARDWARE.md](HARDWARE.md) for commands, results and the remaining procedure:
    establish reliable identification, verify START/address/ACK/STOP and repeated
    START on a logic analyzer, then compare two complete dumps.
-4. **Implement per-chip ECC handling — pending.**
-   Replace the shared GD5F2GM7 ECC interpretation with verified part-specific
-   behavior and check/configure ECC state. Add corrected/threshold/uncorrectable
-   reporting, then OOB/bad-block support and SPI-NOR identification/reads.
+4. **Implement per-chip ECC handling — implemented and offline-tested.**
+   All five table entries have explicit datasheet-backed profiles. Reads enable
+   and verify ECC and per-page mode, check configuration before each page, and
+   restore changed settings on success/failure. Report corrected bit ranges or
+   counts, threshold/max-strength events and uncorrectable pages. Invalid status
+   and failed configuration/status reads abort even with --fill-on-ecc-error.
+   See [ECC.md](ECC.md) for sources, API, cleanup behavior and test coverage.
+   Follow-up: OOB/bad-block support and SPI-NOR identification/reads remain
+   pending; physical validation of the ECC profiles remains part of step 3.
 5. **Add write/erase/verify only after reads and ECC are trusted — pending.**
    Retain the backup/program/verify acceptance requirements below. UART and
    CH341 remain later work; they do not block FT2232D read validation.

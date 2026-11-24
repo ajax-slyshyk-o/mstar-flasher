@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -11,14 +12,23 @@
 
 namespace mstar {
 
-/// Minimal SPI-NAND command set: identify + raw main-area page reads.
-/// Program/erase are deliberately out of scope until reads are trusted
-/// (see doc/BLUEPRINT.md Milestone 6). Bad-block/OOB/ECC-detail handling
-/// beyond "did this page read cleanly" is Milestone 5's job; this layer
-/// only refuses to silently return corrupted data.
+enum class EccState { Clean, Corrected, Threshold };
+
+struct EccReport {
+    EccState state = EccState::Clean;
+    // Maximum corrected bit count in an ECC step, not a sum over the page.
+    // Some chips expose a range rather than an exact count.
+    uint8_t correctedBitsMin = 0;
+    uint8_t correctedBitsMax = 0;
+};
+
+/// SPI-NAND identification and ECC-checked main-area reads. OOB, bad-block
+/// mapping, program and erase remain separate work. See doc/ECC.md for profiles.
 class SpiNand {
 public:
     explicit SpiNand(SpiBus& bus);
+    SpiNand(const SpiNand&) = delete;
+    SpiNand& operator=(const SpiNand&) = delete;
 
     /// Standard SPI-NAND opcode 0xFF, then waits for the device to
     /// report ready.
@@ -35,21 +45,34 @@ public:
     /// ErrorCode::FlashUnknown if the ID doesn't match any entry.
     Result<FlashPart> identify(const std::vector<FlashPart>& table = builtinFlashTable());
 
-    /// Reads exactly geometry.pageSize bytes of the main area (no OOB)
-    /// from the given absolute page index via PAGE READ + READ FROM
-    /// CACHE. Fails with ErrorCode::EccUncorrectable if the chip reports
-    /// the page could not be corrected.
-    Result<void> readPage(
+    /// Enable internal ECC and the part's per-page read mode, with readback.
+    /// Reject unknown profiles and active OTP access. Call restoreReadConfiguration
+    /// on every exit path, including failure: a failed write may have reached flash.
+    Result<void> configureRead(const FlashPart& part);
+
+    /// Restore only configuration bits changed by configureRead; report errors.
+    /// Does not reset/program/erase the flash. Invalidates readPage readiness.
+    Result<void> restoreReadConfiguration();
+
+    /// Requires configureRead. Rechecks configuration, loads a page, decodes
+    /// chip-specific ECC and returns data only for a valid corrected/clean page.
+    /// Uncorrectable data returns EccUncorrectable; inconsistent status returns
+    /// FlashProtocol. Neither permits reading the cache as trusted data.
+    Result<EccReport> readPage(
         uint32_t pageIndex,
-        const NandGeometry& geometry,
         std::span<uint8_t> pageBuffer
     );
 
 private:
     SpiBus* bus_;
+    std::optional<FlashPart> readPart_;
+    uint8_t originalConfig_ = 0;
+    uint8_t changedConfigMask_ = 0;
+    uint8_t configWriteMask_ = 0xFF;
 
     Result<uint8_t> getFeature(uint8_t featureAddress);
     Result<void> setFeature(uint8_t featureAddress, uint8_t value);
+    Result<EccReport> decodeEcc(uint8_t status, uint32_t pageIndex);
 
     /// Polls the status feature register until the operation-in-progress
     /// bit clears. Returns the final status byte, or ErrorCode::Timeout

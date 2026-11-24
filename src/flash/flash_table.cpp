@@ -46,18 +46,14 @@ std::vector<FlashPart> makeBuiltinFlashTable() {
             // register's ECC encoding used in SpiNand::readPage.
             .eccStepSize = 528,
             .eccStrength = 8,
+            .eccProfile = NandEccProfile::Gd5f2gm7,
         },
-        // The following four entries are transplanted from SigmaStar SNI
+        // The following four entries originated in SigmaStar SNI
         // (SPI NAND Info) tables via the flash-sni-utils project
-        // (E:/Projects/AJAX/flash-sni-utils) rather than a datasheet:
-        // these are the exact ID/geometry values SigmaStar's own IPL/
-        // U-Boot uses to drive each chip on real R7-04G/R8-38G hardware,
-        // so they're as trustworthy as a datasheet for ID and geometry.
-        // None of the source records carried usable ECC data (R7-04G
-        // records have no extended-info block at all; the R8-38G record
-        // below has one, but its ECC sub-fields are all zero/unset), so
-        // eccStepSize/eccStrength are left at 0 -- unknown, not a guess --
-        // pending a real datasheet, same as GD5F2GM7 got above.
+        // (E:/Projects/AJAX/flash-sni-utils). IDs and main-area geometry retain
+        // those values; physical spare sizes and ECC profiles have since been
+        // checked/corrected against manufacturer datasheets;
+        // see doc/ECC.md for register semantics, revisions and source links.
 
         // From flash_list.sni (R8-38G format), entry "WINBOND W25N02KV".
         FlashPart{
@@ -75,6 +71,7 @@ std::vector<FlashPart> makeBuiltinFlashTable() {
                 },
             .eccStepSize = 512,
             .eccStrength = 8,
+            .eccProfile = NandEccProfile::W25n02kv,
         },
         // From scripts/r7-04g/cis-gm9-v4.bin, entry "WINBOND W25N01GV".
         FlashPart{
@@ -92,6 +89,7 @@ std::vector<FlashPart> makeBuiltinFlashTable() {
                 },
             .eccStepSize = 512,
             .eccStrength = 1,
+            .eccProfile = NandEccProfile::W25n01gv,
         },
         // From scripts/r7-04g/cis-gm9-v4.bin, entry "GIGADEVICE
         // GD5F1GM9UEYIGR". 3-byte ID per the SNI record (u8_IDByteCnt=3);
@@ -105,13 +103,14 @@ std::vector<FlashPart> makeBuiltinFlashTable() {
             .geometry =
                 {
                     .pageSize = 2048,
-                    .oobSize = 64,
+                    .oobSize = 128,
                     .pagesPerBlock = 64,
                     .blocksPerLun = 1024, // 1Gbit: 64 x 1024 x 2048B = 128 MiB
                     .luns = 1,
                 },
-            .eccStepSize = 512,
+            .eccStepSize = 528,
             .eccStrength = 8,
+            .eccProfile = NandEccProfile::Gd5f1gm9,
         },
         // From scripts/r7-04g/cis-gm9-v4.bin, entry "WINBOND W25N01KV".
         FlashPart{
@@ -122,13 +121,14 @@ std::vector<FlashPart> makeBuiltinFlashTable() {
             .geometry =
                 {
                     .pageSize = 2048,
-                    .oobSize = 64,
+                    .oobSize = 96,
                     .pagesPerBlock = 64,
                     .blocksPerLun = 1024, // 1Gbit: 64 x 1024 x 2048B = 128 MiB
                     .luns = 1,
                 },
             .eccStepSize = 512,
             .eccStrength = 4,
+            .eccProfile = NandEccProfile::W25n01kv,
         },
     };
 }

@@ -104,8 +104,9 @@ I2C W 0x49: 24 -> OK
    Save captures, decoder settings, actual clock and rise-time measurements.
 4. Require repeatable JEDEC bytes matching the physical part and a verified
    table entry/geometry. The current read path is SPI-NAND; an unidentified
-   Winbond part must not be assumed to be supported NAND. Resolve part-specific
-   ECC interpretation before treating a dump as an archival backup.
+   Winbond part must not be assumed to be supported NAND. Validate ECC behavior
+   on the physical part before treating a dump as an archival
+   backup. Software profiles are now implemented; see [ECC.md](ECC.md).
 5. Read a small sample twice first, compare it and measure throughput. Then read
    two full main-area dumps without `--size` or `--fill-on-ecc-error`, retaining
    logs and checking each command's exit code. Use distinct new output paths
@@ -126,8 +127,9 @@ I2C W 0x49: 24 -> OK
    booting, restore that state before proceeding. Both full reads must exit 0,
    have the exact main-area capacity, and compare equal. Record elapsed time,
    ECC diagnostics, hashes and sizes here. Matching hashes alone cannot prove
-   correctness if both reads return the same invalid data. OOB coverage and
-   per-chip ECC acceptance remain separate work in blueprint step 4.
+   correctness if both reads return the same invalid data. OOB coverage remains
+   follow-up work after the per-chip ECC implementation in blueprint step 4;
+   physical ECC validation is still required.
 
 Only mark hardware acceptance complete once the identification, waveform and
 full-dump evidence above is present. Tracing itself is covered by offline tests

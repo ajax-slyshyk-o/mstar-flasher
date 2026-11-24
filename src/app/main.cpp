@@ -192,6 +192,10 @@ int runRead(
         return 1;
     }
 
+    mstar::SpiNand nand(isp);
+
+    // Restore temporary flash configuration before releasing the SoC on every
+    // exit path. A failed configuration write may still have reached the chip.
     // Best-effort: release the SoC from ISP mode on every exit path, unless
     // the caller explicitly asked to stay in ISP mode (--stay-in-isp) to
     // chain further commands without the target resuming execution and
@@ -199,15 +203,21 @@ int runRead(
     // "Unrecognized flash JEDEC ID" failures observed when re-entering ISP
     // mode against an already-running target).
     auto maybeLeaveIsp = [&] {
+        bool restored = true;
+        if (auto result = nand.restoreReadConfiguration(); !result) {
+            fmt::println(stderr, "Failed to restore flash read configuration: {}",
+                         result.error().message);
+            restored = false;
+        }
         if (stayInIsp) {
             fmt::println("Note: --stay-in-isp set; target left halted in MStar ISP mode.");
         } else if (auto leaveResult = isp.leave(); !leaveResult) {
             fmt::println(stderr, "Warning: failed to leave MStar ISP mode: {}",
                           leaveResult.error().message);
         }
+        return restored;
     };
 
-    mstar::SpiNand nand(isp);
     auto part = nand.identify();
     if (!part) {
         fmt::println(stderr, "Failed to identify flash: {}", part.error().message);
@@ -237,6 +247,12 @@ int runRead(
         return 1;
     }
 
+    if (auto result = nand.configureRead(*part); !result) {
+        fmt::println(stderr, "Failed to configure ECC-checked read: {}", result.error().message);
+        maybeLeaveIsp();
+        return 1;
+    }
+
     std::ofstream out(outputPath, std::ios::binary | std::ios::trunc);
     if (!out) {
         fmt::println(stderr, "Failed to open output file: {}", outputPath);
@@ -253,11 +269,16 @@ int runRead(
 
     std::vector<uint8_t> pageBuffer(pageSize);
     uint64_t badPages = 0;
+    uint64_t cleanPages = 0;
+    uint64_t correctedPages = 0;
+    uint64_t thresholdPages = 0;
+    uint64_t uncorrectablePages = 0;
     bool fatalError = false;
 
     for (uint64_t page = startPage; readSize > 0 && page <= endPage && !fatalError; ++page) {
-        auto readResult = nand.readPage(static_cast<uint32_t>(page), part->geometry, pageBuffer);
+        auto readResult = nand.readPage(static_cast<uint32_t>(page), pageBuffer);
         if (!readResult) {
+            if (readResult.error().code == mstar::ErrorCode::EccUncorrectable) ++uncorrectablePages;
             if (readResult.error().code == mstar::ErrorCode::EccUncorrectable && fillOnEccError) {
                 ++badPages;
                 std::fill(pageBuffer.begin(), pageBuffer.end(), 0xFF);
@@ -274,6 +295,16 @@ int runRead(
                 fatalError = true;
                 break;
             }
+        } else if (readResult->state == mstar::EccState::Clean) {
+            ++cleanPages;
+        } else {
+            ++correctedPages;
+            const bool threshold = readResult->state == mstar::EccState::Threshold;
+            if (threshold) ++thresholdPages;
+            fmt::println(stderr,
+                "ECC: page {} corrected (maximum {}..{} bit(s) per ECC step){}",
+                page, readResult->correctedBitsMin, readResult->correctedBitsMax,
+                threshold ? "; threshold exceeded or correction limit reached" : "");
         }
 
         uint64_t pageStartByte = page * pageSize;
@@ -301,7 +332,10 @@ int runRead(
         fatalError = true;
     }
 
-    maybeLeaveIsp();
+    if (!maybeLeaveIsp()) fatalError = true;
+    fmt::println(stderr,
+        "ECC summary: {} clean, {} corrected ({} threshold/max-strength), {} uncorrectable page(s)",
+        cleanPages, correctedPages, thresholdPages, uncorrectablePages);
 
     if (fatalError) {
         fmt::println(stderr, "Read failed; output file {} may be incomplete.", outputPath);

@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <array>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "mstar/flash/spi_nand.hpp"
 #include "mock_spi_bus.hpp"
@@ -95,59 +97,278 @@ TEST_CASE("SpiNand::waitReady times out if the operation-in-progress bit never c
     CHECK(result.error().code == ErrorCode::Timeout);
 }
 
-TEST_CASE("SpiNand::readPage issues PAGE READ then READ FROM CACHE and returns page data", "[spi_nand]") {
-    MockSpiBus bus;
-    SpiNand nand(bus);
-    bus.queueResponse({0x00}); // waitReady after PAGE READ
-    bus.queueResponse({0xDE, 0xAD, 0xBE, 0xEF}); // cache contents
-
-    NandGeometry geometry{.pageSize = 4, .oobSize = 0, .pagesPerBlock = 1, .blocksPerLun = 1, .luns = 1};
-    std::array<uint8_t, 4> buffer{};
-    REQUIRE(nand.readPage(5, geometry, buffer).has_value());
-    CHECK(buffer == std::array<uint8_t, 4>{0xDE, 0xAD, 0xBE, 0xEF});
-
-    REQUIRE(bus.transactions.size() == 3);
-    CHECK(bus.transactions[0].tx == std::vector<uint8_t>{0x13, 0x00, 0x00, 0x05});
-    CHECK(bus.transactions[1].tx == std::vector<uint8_t>{0x0F, 0xC0});
-    CHECK(bus.transactions[2].tx == std::vector<uint8_t>{0x03, 0x00, 0x00, 0x00});
+namespace {
+FlashPart smallPart(NandEccProfile profile = NandEccProfile::Gd5f2gm7) {
+    const auto& table = builtinFlashTable();
+    auto it = std::find_if(table.begin(), table.end(),
+                          [profile](const auto& part) { return part.eccProfile == profile; });
+    REQUIRE(it != table.end());
+    auto part = *it;
+    part.geometry = {.pageSize = 4, .oobSize = 0, .pagesPerBlock = 16, .blocksPerLun = 1, .luns = 1};
+    return part;
+}
+uint8_t enabledConfig(const FlashPart& part) {
+    return part.eccProfile == NandEccProfile::Gd5f2gm7 ? 0x10 : 0x18;
+}
+void configure(MockSpiBus& bus, SpiNand& nand, const FlashPart& part) {
+    bus.queueResponse({enabledConfig(part)});
+    REQUIRE(nand.configureRead(part));
+    bus.clearResponses();
+    bus.transactions.clear();
+}
+bool sent(const MockSpiBus& bus, std::vector<uint8_t> bytes) {
+    return std::any_of(bus.transactions.begin(), bus.transactions.end(),
+                       [&](const auto& t) { return t.tx == bytes; });
+}
 }
 
-TEST_CASE("SpiNand::readPage fails with EccUncorrectable when the status register reports an uncorrectable error", "[spi_nand]") {
-    MockSpiBus bus;
-    SpiNand nand(bus);
-    bus.queueResponse({0x20}); // ECC status bits (ECCS1:ECCS0) = 10 -> uncorrectable
-
-    NandGeometry geometry{.pageSize = 4, .oobSize = 0, .pagesPerBlock = 1, .blocksPerLun = 1, .luns = 1};
-    std::array<uint8_t, 4> buffer{};
-    auto result = nand.readPage(0, geometry, buffer);
-
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error().code == ErrorCode::EccUncorrectable);
+TEST_CASE("Every built-in part has a verified ECC profile and strength", "[spi_nand][ecc]") {
+    for (const auto& part : builtinFlashTable()) {
+        DYNAMIC_SECTION(part.model) {
+            MockSpiBus bus;
+            SpiNand nand(bus);
+            configure(bus, nand, part);
+        }
+    }
 }
 
-TEST_CASE("SpiNand::readPage succeeds when the status register reports ECC corrected at max strength", "[spi_nand]") {
+TEST_CASE("ECC configuration preserves unrelated bits and restores only owned bits", "[spi_nand][ecc]") {
+    auto profile = GENERATE(NandEccProfile::Gd5f2gm7, NandEccProfile::Gd5f1gm9,
+                           NandEccProfile::W25n01gv, NandEccProfile::W25n01kv,
+                           NandEccProfile::W25n02kv);
     MockSpiBus bus;
     SpiNand nand(bus);
-    bus.queueResponse({0x30}); // ECC status bits (ECCS1:ECCS0) = 11 -> corrected, still good data
-    bus.queueResponse({0xDE, 0xAD, 0xBE, 0xEF});
-
-    NandGeometry geometry{.pageSize = 4, .oobSize = 0, .pagesPerBlock = 1, .blocksPerLun = 1, .luns = 1};
+    auto part = smallPart(profile);
+    const uint8_t initial = 0x81; // OTP protection and QE/drive setting preserved
+    const uint8_t enabled = initial | enabledConfig(part);
+    bus.queueResponse({initial});
+    bus.queueResponse({0x01}); // busy after feature write
+    bus.queueResponse({0x00});
+    bus.queueResponse({enabled});
+    REQUIRE(nand.configureRead(part));
+    CHECK(sent(bus, {0x1F, 0xB0, enabled}));
+    if (profile == NandEccProfile::Gd5f2gm7) CHECK((enabled & 8) == 0); // don't set BPL!
+    bus.clearResponses();
+    // An unrelated bit changed after setup: restore must preserve it.
+    bus.queueResponse({static_cast<uint8_t>(enabled & ~1)});
+    bus.queueResponse({0x00});
+    bus.queueResponse({0x80});
+    REQUIRE(nand.restoreReadConfiguration());
+    CHECK(sent(bus, {0x1F, 0xB0, 0x80}));
+    const auto count = bus.transactions.size();
+    REQUIRE(nand.restoreReadConfiguration());
+    CHECK(bus.transactions.size() == count);
     std::array<uint8_t, 4> buffer{};
-    auto result = nand.readPage(0, geometry, buffer);
-
-    REQUIRE(result.has_value());
-    CHECK(buffer == std::array<uint8_t, 4>{0xDE, 0xAD, 0xBE, 0xEF});
+    CHECK_FALSE(nand.readPage(0, buffer));
 }
 
-TEST_CASE("SpiNand::readPage rejects a buffer size that does not match geometry.pageSize", "[spi_nand]") {
+TEST_CASE("Already enabled ECC requires no configuration writes", "[spi_nand][ecc]") {
     MockSpiBus bus;
     SpiNand nand(bus);
+    auto part = smallPart();
+    bus.queueResponse({0x19}); // GM7 BPL/QE must remain set
+    REQUIRE(nand.configureRead(part));
+    REQUIRE(nand.restoreReadConfiguration());
+    REQUIRE(bus.transactions.size() == 1);
+    CHECK(bus.transactions[0].tx == std::vector<uint8_t>{0x0F, 0xB0});
+}
 
-    NandGeometry geometry{.pageSize = 4, .oobSize = 0, .pagesPerBlock = 1, .blocksPerLun = 1, .luns = 1};
-    std::array<uint8_t, 2> buffer{};
-    auto result = nand.readPage(0, geometry, buffer);
+TEST_CASE("Unknown ECC profiles and active OTP cannot authorize a read", "[spi_nand][ecc]") {
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    auto part = smallPart();
+    SECTION("unknown profile") { part.eccProfile = NandEccProfile::Unknown; }
+    SECTION("inconsistent strength") { part.eccStrength = 0; }
+    SECTION("OTP access") { bus.queueResponse({0x50}); }
+    auto result = nand.configureRead(part);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == ErrorCode::FlashProtocol);
+    CHECK(bus.transactions.size() <= 1);
+    std::array<uint8_t, 4> buffer{};
+    CHECK_FALSE(nand.readPage(0, buffer));
+}
 
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error().code == ErrorCode::InvalidArgument);
-    CHECK(bus.transactions.empty());
+TEST_CASE("Configuration errors propagate and partial writes remain restorable", "[spi_nand][ecc]") {
+    const auto failingTransaction = GENERATE(size_t{0}, size_t{1}, size_t{2}, size_t{3});
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    bus.queueResponse({0});
+    bus.queueResponse({0});
+    bus.queueResponse({0x10});
+    bus.failTransactionAt = failingTransaction;
+    auto result = nand.configureRead(smallPart());
+    REQUIRE_FALSE(result);
+    CHECK(result.error().message == "mock SPI transaction failure");
+    bus.failTransactionAt.reset();
+    bus.clearResponses();
+    bus.queueResponse({0x10});
+    bus.queueResponse({0});
+    bus.queueResponse({0});
+    REQUIRE(nand.restoreReadConfiguration());
+    CHECK(sent(bus, {0x1F, 0xB0, 0}) == (failingTransaction != 0));
+}
+
+TEST_CASE("Configuration readback mismatch and timeout fail closed", "[spi_nand][ecc]") {
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    bus.queueResponse({0});
+    SECTION("write ignored") {
+        bus.queueResponse({0});
+        auto result = nand.configureRead(smallPart());
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == ErrorCode::FlashProtocol);
+    }
+    SECTION("busy never clears") {
+        bus.queueResponse({1});
+        auto result = nand.configureRead(smallPart());
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == ErrorCode::Timeout);
+    }
+}
+
+TEST_CASE("Failed restore is reported and can be retried", "[spi_nand][ecc]") {
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    bus.queueResponse({0});
+    bus.queueResponse({0});
+    bus.queueResponse({0x10});
+    REQUIRE(nand.configureRead(smallPart()));
+    bus.clearResponses();
+    SECTION("transport error") { bus.failNextTransaction = true; }
+    SECTION("readback mismatch") { bus.queueResponse({0x10}); }
+    auto result = nand.restoreReadConfiguration();
+    REQUIRE_FALSE(result);
+    bus.clearResponses();
+    bus.queueResponse({0x10});
+    bus.queueResponse({0});
+    bus.queueResponse({0});
+    REQUIRE(nand.restoreReadConfiguration());
+}
+
+TEST_CASE("Page reads use each part's ECC status instead of a shared interpretation", "[spi_nand][ecc]") {
+    const auto status = GENERATE(uint8_t{0x00}, uint8_t{0x10}, uint8_t{0x20}, uint8_t{0x30});
+    for (auto profile : {NandEccProfile::Gd5f2gm7, NandEccProfile::Gd5f1gm9,
+                         NandEccProfile::W25n01gv, NandEccProfile::W25n01kv,
+                         NandEccProfile::W25n02kv}) {
+        DYNAMIC_SECTION(static_cast<int>(profile) << ": status " << int(status)) {
+            MockSpiBus bus;
+            SpiNand nand(bus);
+            auto part = smallPart(profile);
+            configure(bus, nand, part);
+            bus.queueResponse({enabledConfig(part)});
+            bus.queueResponse({static_cast<uint8_t>(status | 1)}); // busy status ignored
+            bus.queueResponse({status});
+            const bool giga = profile == NandEccProfile::Gd5f2gm7 || profile == NandEccProfile::Gd5f1gm9;
+            const bool gv = profile == NandEccProfile::W25n01gv;
+            if (status == 0x10 && giga) bus.queueResponse({0}); // corrected 1..4
+            if ((status == 0x10 || status == 0x30) && !giga && !gv) bus.queueResponse({0x30});
+            bus.queueResponse({0xDE, 0xAD, 0xBE, 0xEF});
+            std::array<uint8_t, 4> buffer{0xAA, 0xAA, 0xAA, 0xAA};
+            auto result = nand.readPage(5, buffer);
+            CHECK(sent(bus, {0x13, 0, 0, 5}));
+            if (status == 0x20 || (gv && status == 0x30)) {
+                REQUIRE_FALSE(result);
+                CHECK(result.error().code == (status == 0x20 ? ErrorCode::EccUncorrectable : ErrorCode::FlashProtocol));
+                CHECK_FALSE(sent(bus, {0x03, 0, 0, 0}));
+                CHECK(buffer == std::array<uint8_t, 4>{0xAA, 0xAA, 0xAA, 0xAA});
+            } else {
+                REQUIRE(result);
+                CHECK(sent(bus, {0x03, 0, 0, 0}));
+                CHECK(buffer == std::array<uint8_t, 4>{0xDE, 0xAD, 0xBE, 0xEF});
+                CHECK(result->state == (status == 0 ? EccState::Clean :
+                    status == 0x30 || gv ? EccState::Threshold : EccState::Corrected));
+                if (status == 0) CHECK(result->correctedBitsMax == 0);
+                else if (gv) CHECK(result->correctedBitsMax == 1);
+                else if (giga) CHECK(result->correctedBitsMax == (status == 0x30 ? 8 : 4));
+                else CHECK(result->correctedBitsMax == 3);
+            }
+        }
+    }
+}
+
+TEST_CASE("GigaDevice extended ECC reports ranges and exact counts from F0", "[spi_nand][ecc]") {
+    const auto profile = GENERATE(NandEccProfile::Gd5f2gm7, NandEccProfile::Gd5f1gm9);
+    const auto detail = GENERATE(0, 1, 2, 3);
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    auto part = smallPart(profile);
+    configure(bus, nand, part);
+    bus.queueResponse({enabledConfig(part)});
+    bus.queueResponse({0x10});
+    bus.queueResponse({static_cast<uint8_t>((detail << 4) | 0xCF)}); // ignore unrelated bits
+    bus.queueResponse({1, 2, 3, 4});
+    std::array<uint8_t, 4> buffer{};
+    auto result = nand.readPage(0, buffer);
+    REQUIRE(result);
+    CHECK(result->correctedBitsMin == (detail ? 4 + detail : 1));
+    CHECK(result->correctedBitsMax == 4 + detail);
+    CHECK(sent(bus, {0x0F, 0xF0}));
+}
+
+TEST_CASE("Winbond KV validates extended counts and masks reserved bits", "[spi_nand][ecc]") {
+    const auto profile = GENERATE(NandEccProfile::W25n01kv, NandEccProfile::W25n02kv);
+    const auto bits = GENERATE(0, 1, 4, 5, 8, 15);
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    auto part = smallPart(profile);
+    configure(bus, nand, part);
+    bus.queueResponse({enabledConfig(part)});
+    bus.queueResponse({0x10});
+    const auto raw = static_cast<uint8_t>((bits << 4) | 0x0F |
+        (profile == NandEccProfile::W25n01kv ? 0x80 : 0));
+    bus.queueResponse({raw});
+    bus.queueResponse({1, 2, 3, 4});
+    std::array<uint8_t, 4> buffer{};
+    auto result = nand.readPage(0, buffer);
+    if (bits == 0 || bits > int(part.eccStrength)) {
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == ErrorCode::FlashProtocol);
+        CHECK_FALSE(sent(bus, {0x03, 0, 0, 0}));
+    } else {
+        REQUIRE(result);
+        CHECK(result->correctedBitsMin == bits);
+        CHECK(result->correctedBitsMax == bits);
+    }
+    CHECK(sent(bus, {0x0F, 0x30}));
+}
+
+TEST_CASE("A changed read configuration or invalid range prevents PAGE READ", "[spi_nand][ecc]") {
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    configure(bus, nand, smallPart(NandEccProfile::W25n01kv));
+    std::array<uint8_t, 4> buffer{};
+    Result<EccReport> result;
+    SECTION("ECC disabled") { bus.queueResponse({8}); result = nand.readPage(0, buffer); }
+    SECTION("buffer mode disabled") { bus.queueResponse({0x10}); result = nand.readPage(0, buffer); }
+    SECTION("OTP activated") { bus.queueResponse({0x58}); result = nand.readPage(0, buffer); }
+    SECTION("invalid page") { result = nand.readPage(16, buffer); }
+    SECTION("invalid buffer") { result = nand.readPage(0, std::span(buffer).first(2)); }
+    REQUIRE_FALSE(result);
+    CHECK(bus.transactions.size() <= 1);
+}
+
+TEST_CASE("Read errors at every stage propagate without returning clean ECC", "[spi_nand][ecc]") {
+    const auto index = GENERATE(size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4});
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    configure(bus, nand, smallPart());
+    bus.queueResponse({0x10}); // config
+    bus.queueResponse({0x10}); // status
+    bus.queueResponse({0}); // extended ECC
+    bus.queueResponse({1, 2, 3, 4});
+    bus.failTransactionAt = index;
+    std::array<uint8_t, 4> buffer{};
+    auto result = nand.readPage(0, buffer);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().message == "mock SPI transaction failure");
+}
+
+TEST_CASE("Reset invalidates prepared page reads", "[spi_nand][ecc]") {
+    MockSpiBus bus;
+    SpiNand nand(bus);
+    configure(bus, nand, smallPart());
+    bus.queueResponse({0});
+    REQUIRE(nand.reset());
+    std::array<uint8_t, 4> buffer{};
+    REQUIRE_FALSE(nand.readPage(0, buffer));
 }
