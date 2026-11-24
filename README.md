@@ -11,8 +11,10 @@ plan.
 
 Hardware-independent `mstar-core` library with ISP/SPI-NAND logic and offline
 unit tests. The FTDI backend uses D2XX + LibMPSSE on Windows and libftdi1/libusb
-on Linux. Linux builds and transfer sequences are tested without hardware;
-electrical timing and real programmer operation still need bench validation.
+on Linux. Offline tests pass and Linux USB access has been checked on an original
+FT2232C/D programmer. Target identification is still unreliable on the connected
+board; electrical timing and complete dumps remain unverified. See the
+[hardware acceptance record](doc/HARDWARE.md) for results and remaining checks.
 
 ## Building
 
@@ -99,6 +101,22 @@ cmake --preset windows -DMSTAR_ENABLE_FTDI=ON \
   -DFTD2XX_ROOT=C:/SDK/FTDI/D2XX \
   -DLIBMPSSE_ROOT=C:/SDK/FTDI/LibMPSSE
 ```
+
+## Tracing I2C transactions
+
+`probe`, `read`, and `i2c-test` accept `--trace-i2c`:
+
+```console
+./build/linux/mstar-cli probe --serial ggggggggA --trace-i2c 2>probe-i2c.log
+./build/linux/mstar-cli i2c-test --serial ggggggggA --trace-i2c
+```
+
+The trace goes to stderr and records the requested clock, seven-bit address,
+transmitted/received bytes and transport errors. `W` means write, `R` read, and
+`WR` a combined write/read with repeated START. Buffers larger than 32 bytes are
+summarized by length; failed reads do not print potentially stale data. Software
+traces cannot verify electrical timing or prove that a reported ACK is genuine.
+See [hardware acceptance](doc/HARDWARE.md) for the bench procedure.
 
 ## Reading a NAND dump
 

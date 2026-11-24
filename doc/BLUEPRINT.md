@@ -1235,11 +1235,17 @@ Work in this order:
    and moves. The real D2XX I2C source is compiled against test-only SDK stubs.
    Validation: Linux Debug, Release and FTDI-disabled suites pass. Native Windows
    SDK/driver validation and hardware acceptance remain pending.
-3. **Complete hardware acceptance — pending.**
-   Check/apply host USB setup, verify START/address/ACK/STOP and repeated START
-   on a logic analyzer, identify the actual target, then compare two complete
-   dumps. Record wiring, chip IDs, commands and results in `doc/HARDWARE.md`.
-   Add `--trace-i2c` (section 12) to help correlate commands with captures.
+3. **Complete hardware acceptance — partial; target validation blocked.**
+   Host USB setup passes and the original FT2232C/D enumerates on Linux.
+   `--trace-i2c` is implemented for probe/read/i2c-test and offline-tested.
+   Bench probes return unstable, unknown JEDEC IDs; a reserved-address negative
+   control unexpectedly ACKs. A user-coordinated power-cycle retry also failed;
+   stopping the board before Linux starts could not be confirmed. The user
+   reports Winbond flash, but the exact part and wiring remain unverified.
+   No logic analyzer is connected and no dumps were attempted. See
+   [HARDWARE.md](HARDWARE.md) for commands, results and the remaining procedure:
+   establish reliable identification, verify START/address/ACK/STOP and repeated
+   START on a logic analyzer, then compare two complete dumps.
 4. **Implement per-chip ECC handling — pending.**
    Replace the shared GD5F2GM7 ECC interpretation with verified part-specific
    behavior and check/configure ECC state. Add corrected/threshold/uncorrectable

@@ -28,6 +28,7 @@ add_library(mstar-core
     src/isp/mstar_isp.cpp
     src/flash/flash_table.cpp
     src/flash/spi_nand.cpp
+    src/transport/tracing_i2c.cpp
 )
 target_include_directories(mstar-core PUBLIC include)
 target_compile_features(mstar-core PUBLIC cxx_std_23)
@@ -84,6 +85,7 @@ if(MSTAR_BUILD_TESTS)
     add_executable(mstar-tests
         tests/test_mstar_isp.cpp
         tests/test_spi_nand.cpp
+        tests/test_tracing_i2c.cpp
     )
     target_link_libraries(mstar-tests PRIVATE mstar-core Catch2::Catch2WithMain)
     target_include_directories(mstar-tests PRIVATE tests)

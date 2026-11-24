@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <iostream>
 #include <span>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "mstar/flash/flash_table.hpp"
 #include "mstar/flash/spi_nand.hpp"
 #include "mstar/isp/mstar_isp.hpp"
+#include "mstar/transport/tracing_i2c.hpp"
 
 #ifdef MSTAR_ENABLE_FTDI
 #include "mstar/transport/ftdi/ftdi_i2c.hpp"
@@ -71,7 +73,8 @@ int runList() {
 #endif
 }
 
-int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz, bool stayInIsp) {
+int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz,
+             bool stayInIsp, bool traceI2c) {
 #ifdef MSTAR_ENABLE_FTDI
     mstar::ProgrammerSelector selector;
     if (!serial.empty()) {
@@ -84,7 +87,8 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz,
         return 1;
     }
 
-    if (auto result = i2c->setClock(i2cClockHz); !result) {
+    mstar::TracingI2cMaster bus(*i2c, traceI2c ? &std::cerr : nullptr);
+    if (auto result = bus.setClock(i2cClockHz); !result) {
         fmt::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
@@ -92,7 +96,7 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz,
     fmt::println("Target:");
     fmt::println("  MStar ISP address: {:#x}", ispAddress);
 
-    mstar::MstarIsp isp(*i2c, ispAddress);
+    mstar::MstarIsp isp(bus, ispAddress);
 
     if (auto result = isp.enter(); !result) {
         fmt::println("  ISP activation: FAILED ({})", result.error().message);
@@ -146,6 +150,7 @@ int runProbe(const std::string& serial, uint8_t ispAddress, uint32_t i2cClockHz,
     (void)serial;
     (void)ispAddress;
     (void)i2cClockHz;
+    (void)traceI2c;
     (void)stayInIsp;
     fmt::println("No programmer backends are enabled in this build.");
     return 1;
@@ -160,7 +165,8 @@ int runRead(
     uint64_t offset,
     uint64_t size,
     bool stayInIsp,
-    bool fillOnEccError
+    bool fillOnEccError,
+    bool traceI2c
 ) {
 #ifdef MSTAR_ENABLE_FTDI
     mstar::ProgrammerSelector selector;
@@ -174,12 +180,13 @@ int runRead(
         return 1;
     }
 
-    if (auto result = i2c->setClock(i2cClockHz); !result) {
+    mstar::TracingI2cMaster bus(*i2c, traceI2c ? &std::cerr : nullptr);
+    if (auto result = bus.setClock(i2cClockHz); !result) {
         fmt::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
 
-    mstar::MstarIsp isp(*i2c, ispAddress);
+    mstar::MstarIsp isp(bus, ispAddress);
     if (auto result = isp.enter(); !result) {
         fmt::println(stderr, "Failed to enter MStar ISP mode: {}", result.error().message);
         return 1;
@@ -314,6 +321,7 @@ int runRead(
     (void)serial;
     (void)ispAddress;
     (void)i2cClockHz;
+    (void)traceI2c;
     (void)outputPath;
     (void)offset;
     (void)size;
@@ -327,7 +335,7 @@ int runRead(
 // Milestone 2 hardware validation (see docs/BLUEPRINT.md, "Test B - I2C
 // electrical activity"): a single-byte write with nothing above I2cMaster
 // involved, so START/address/ACK/STOP can be inspected on a logic analyzer.
-int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockHz) {
+int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockHz, bool traceI2c) {
 #ifdef MSTAR_ENABLE_FTDI
     mstar::ProgrammerSelector selector;
     if (!serial.empty()) {
@@ -340,7 +348,8 @@ int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockH
         return 1;
     }
 
-    if (auto result = i2c->setClock(i2cClockHz); !result) {
+    mstar::TracingI2cMaster bus(*i2c, traceI2c ? &std::cerr : nullptr);
+    if (auto result = bus.setClock(i2cClockHz); !result) {
         fmt::println(stderr, "Failed to set I2C clock: {}", result.error().message);
         return 1;
     }
@@ -349,7 +358,7 @@ int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockH
     fmt::println("Expect on a logic analyzer: START, address+W, ACK/NACK, STOP.");
 
     std::array<uint8_t, 1> probeByte{0x00};
-    auto result = i2c->write(i2cAddress, probeByte);
+    auto result = bus.write(i2cAddress, probeByte);
     if (!result) {
         fmt::println("No ACK ({})", result.error().message);
         return 1;
@@ -361,6 +370,7 @@ int runI2cTest(const std::string& serial, uint8_t i2cAddress, uint32_t i2cClockH
     (void)serial;
     (void)i2cAddress;
     (void)i2cClockHz;
+    (void)traceI2c;
     fmt::println("No programmer backends are enabled in this build.");
     return 1;
 #endif
@@ -380,6 +390,8 @@ int main(int argc, char** argv) {
     static uint32_t ispAddress = 0x49;
     static uint32_t i2cClockHz = 100000;
     static bool probeStayInIsp = false;
+    static bool probeTraceI2c = false;
+    probe->add_flag("--trace-i2c", probeTraceI2c, "Trace I2C transactions to stderr");
     probe->add_option("--serial", serial, "Select programmer by serial number");
     probe->add_option("--i2c-address", ispAddress, "MStar ISP I2C address")->default_val(0x49);
     probe->add_option("--i2c-clock", i2cClockHz, "I2C clock in Hz")->default_val(100000);
@@ -388,7 +400,8 @@ int main(int argc, char** argv) {
         "Don't release the target when done; keeps it halted so a following "
         "probe/read doesn't have to re-win the SPI bus from a running SoC");
     probe->callback([] {
-        std::exit(runProbe(serial, static_cast<uint8_t>(ispAddress), i2cClockHz, probeStayInIsp));
+        std::exit(runProbe(serial, static_cast<uint8_t>(ispAddress), i2cClockHz,
+                           probeStayInIsp, probeTraceI2c));
     });
 
     auto* read = app.add_subcommand("read", "Read part or all of the flash's main area to a file");
@@ -400,6 +413,9 @@ int main(int argc, char** argv) {
     static uint64_t readSize = 0;
     static bool readStayInIsp = false;
     static bool readFillOnEccError = false;
+    static bool readTraceI2c = false;
+    read->add_flag("--trace-i2c", readTraceI2c,
+        "Trace I2C transactions to stderr (large buffers summarized)");
     read->add_option("output", readOutputPath, "Output file path")->required();
     read->add_option("--serial", readSerial, "Select programmer by serial number");
     read->add_option("--i2c-address", readIspAddress, "MStar ISP I2C address")->default_val(0x49);
@@ -418,7 +434,7 @@ int main(int argc, char** argv) {
     read->callback([] {
         std::exit(runRead(
             readSerial, static_cast<uint8_t>(readIspAddress), readI2cClockHz, readOutputPath,
-            readOffset, readSize, readStayInIsp, readFillOnEccError));
+            readOffset, readSize, readStayInIsp, readFillOnEccError, readTraceI2c));
     });
 
     auto* i2cTest = app.add_subcommand(
@@ -426,12 +442,15 @@ int main(int argc, char** argv) {
     static std::string i2cTestSerial;
     static uint32_t i2cTestAddress = 0x49;
     static uint32_t i2cTestClockHz = 100000;
+    static bool testTraceI2c = false;
+    i2cTest->add_flag("--trace-i2c", testTraceI2c, "Trace I2C transactions to stderr");
     i2cTest->add_option("--serial", i2cTestSerial, "Select programmer by serial number");
     i2cTest->add_option("--i2c-address", i2cTestAddress, "I2C address to probe")
         ->default_val(0x49);
     i2cTest->add_option("--i2c-clock", i2cTestClockHz, "I2C clock in Hz")->default_val(100000);
     i2cTest->callback([] {
-        std::exit(runI2cTest(i2cTestSerial, static_cast<uint8_t>(i2cTestAddress), i2cTestClockHz));
+        std::exit(runI2cTest(i2cTestSerial, static_cast<uint8_t>(i2cTestAddress),
+                             i2cTestClockHz, testTraceI2c));
     });
 
     CLI11_PARSE(app, argc, argv);
