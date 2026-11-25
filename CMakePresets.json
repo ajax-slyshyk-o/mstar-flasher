@@ -14,7 +14,7 @@
     },
     {
       "name": "windows",
-      "displayName": "Windows x64 (MSVC, Ninja)",
+      "displayName": "Windows x64 Debug (MSVC, Ninja)",
       "description": "VSCode CMake Tools auto-injects the MSVC x64 environment (cl.exe, INCLUDE, LIB) when it sees CMAKE_C/CXX_COMPILER=cl.exe plus an external architecture. From a plain shell, still run from a Developer PowerShell/Command Prompt for Visual Studio.",
       "inherits": "base",
       "generator": "Ninja",
