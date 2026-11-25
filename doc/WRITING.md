@@ -18,26 +18,43 @@ padding, block skipping, remapping, or preservation of bytes outside a partial
 block: partial blocks are rejected.
 
 ```sh
-# Check the selected range and save/verify a backup, without erase/program:
+# Check the selected range without erase/program or a backup:
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA --offset 0 --dry-run
+
+# Erase, program and verify without a backup:
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA --offset 0
+
+# Check the selected range and save/verify an optional backup, without erase/program:
 ./build/linux/mstar-cli write firmware.bin --serial ggggggggA \
     --offset 0 --backup before-test.raw --dry-run
 
 # Back up to a NEW path, erase the image range, program and verify:
 ./build/linux/mstar-cli write firmware.bin --serial ggggggggA \
-    --offset 0 --backup before-write.raw --yes
+    --offset 0 --backup before-write.raw
 
 # Compare an existing main-area image with the device:
 ./build/linux/mstar-cli verify firmware.bin --serial ggggggggA --offset 0
 ```
 
 `write` uses the first detected programmer when `--serial` is omitted, including
-with `--dry-run`. Supply `--serial` to select a specific programmer. A new backup
-path is required. `--yes`
-authorizes the destructive operation; `--dry-run` stops after preflight/backup,
-even if `--yes` is also present. Both commands accept `--trace-i2c`,
+with `--dry-run`. Supply `--serial` to select a specific programmer. `write`
+erases/programs by default; `--yes` has been removed. `--dry-run` stops after
+preflight and any requested backup without erasing/programming. `--backup PATH`
+is optional in either mode and requires a new path when supplied. Omitting it
+skips backup creation, comparison and their full-page reads. Both commands accept `--trace-i2c`,
 `--i2c-address`, `--i2c-clock`, and `--stay-in-isp`. The last option omits ISP
 exit but still restores flash settings. Success is exit 0; any failure is nonzero.
 There is no standalone CLI `erase` or raw/OOB programming command yet.
+
+Progress is flushed to stderr during marker checks, any backup creation and
+comparison, preserved-tail reads, programming and image verification. Each stage reports completed
+pages/blocks, percentage, the last completed device page/block, elapsed time
+and an estimated remaining time for that stage. Updates appear after the first
+completed item, then at most once per second and at stage completion. A blocked
+transport call cannot produce further progress until it returns. Backup creation
+reads each page through ECC and again as raw bytes; backup comparison performs
+another raw read before any erase. These passes can be slow on Windows, where
+the current LibMPSSE transfer mode exchanges USB data one byte at a time.
 
 ## Vendor multi-image configs
 
@@ -53,15 +70,15 @@ u-boot_spinand.xz.img.sig.bin : 0x200000
 
 ```sh
 ./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg \
-    --backup before-config.raw --yes
+    --backup before-config.raw
 
 # Preserve bytes after each file within its last erase block:
 ./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg \
-    --preserve-gaps --backup before-preserved-write.raw --yes
+    --preserve-gaps --backup before-preserved-write.raw
 ```
 
-Use `--dry-run` instead of `--yes` to check the complete plan and save/compare
-its backup without erasing/programming. The config replaces the positional
+Add `--dry-run` to check the complete plan without erasing/programming.
+The backup is saved and compared only when `--backup` is supplied. The config replaces the positional
 image and `--offset`; combining them is an error. `--preserve-gaps` requires
 `--config`. Programmer selection and other write options work as above.
 
@@ -81,8 +98,10 @@ on-chip ECC parity is regenerated. Overlapping erase ranges are rejected,
 including duplicate addresses and overlaps caused by rounding file sizes up.
 
 All files are loaded before opening the programmer. After identification, all
-ranges are validated, sorted by address, checked for bad-block markers, backed
-up and compared before the first erase. The write verifies every byte in all
+ranges are validated, sorted by address and checked for bad-block markers
+before the first erase. Requested backups are saved and compared, and all
+preserved tails are read, before any erase. Without a backup, `--preserve-gaps`
+reads only pages containing preserved tail bytes. The write verifies every byte in all
 affected blocks, including filled or preserved tails. A failure stops the batch;
 previously programmed blocks are not rolled back. Config syntax compatibility
 does not add vendor-specific CIS generation, bad-block remapping or OOB formats.
@@ -94,10 +113,12 @@ does not add vendor-specific CIS generation, bad-block remapping or OOB formats.
 3. Validate the range and configure ECC/per-page reads.
 4. Check spare-area bad-block markers across the entire requested range. A
    marked or unreadable block aborts before any erase or program.
-5. Read every source page with ECC checking, then save its raw main+OOB bytes.
-   Finish and close the backup, reopen it, and compare it with a second raw read.
-   A mismatch or any file/read error prevents programming. No ECC placeholders
-   are permitted in this workflow.
+5. When `--backup` is supplied, read every source page with ECC checking, then
+   save its raw main+OOB bytes. Finish and close the backup, reopen it, and
+   compare it with a second raw read. A mismatch or any file/read error prevents
+   programming. Without backup, skip these full-page passes. With
+   `--preserve-gaps`, read all required tail pages through ECC before any erase.
+   No ECC placeholders are permitted in this workflow.
 6. Unless this is a dry run, temporarily clear volatile block-protection bits
    and verify the change. Hardware protection and OTP locks are not bypassed.
 7. Recheck each block's markers, erase it, and program full pages in ascending
@@ -114,7 +135,7 @@ explicit OOB metadata or a different bad-block mapping policy.
 
 ## Backup format and failures
 
-`--backup PATH` creates two new files without overwriting existing files:
+The optional `--backup PATH` creates two new files without overwriting existing files:
 
 - `PATH`: headerless pages in ascending device-address order, each containing
   `page_size` raw main bytes followed by `physical_oob_size` raw spare bytes.
@@ -140,9 +161,10 @@ layout; automatic restore is not implemented here.
 Backups are flushed, closed and compared through file reads, but no platform
 specific durable-storage sync is implemented. Keep the files and manifest on
 reliable storage. Partial backups are retained after failure; their presence
-alone does not establish a complete backup. A successful dry run reports that
-the backup comparison finished. After a failed erase/program/verification,
-flash may be partially changed; the original verified backup remains available.
+alone does not establish a complete backup. A successful dry run with
+`--backup` reports that the backup comparison finished. After a failed
+erase/program/verification, flash may be partially changed. A requested,
+verified backup remains available; writes without `--backup` create no backup.
 
 Device addresses retain any pre-existing chip-internal bad-block links. This
 implementation neither edits those links nor claims access to hidden/remapped
@@ -166,7 +188,9 @@ The stateful NAND model additionally checks write-enable, erase-before-program,
 cache replacement, 1-to-0 programming behavior, neighboring-block preservation,
 status failures, busy timeouts, failed acknowledgements, and verification
 mismatches. CLI tests run the real CLI/ISP code against this model, checking the
-backup bytes/manifest, confirmation, alignment, error exits and cleanup.
+optional backup bytes/manifest, alignment, error exits and cleanup. Tests also
+check that omitted backups cause no full raw reads, dry runs issue no mutations,
+removed `--yes` is rejected, and tail preservation works without a backup.
 Config tests also inspect the model's final bytes independently: repeated
 images, partial pages, multi-block files, both tail policies and untouched
 gaps. Missing/malformed inputs, overlaps, bad markers in later ranges and late

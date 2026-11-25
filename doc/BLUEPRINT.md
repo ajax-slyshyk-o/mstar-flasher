@@ -740,13 +740,15 @@ mstar-flasher write firmware.bin
 mstar-flasher erase
 ```
 
-Destructive commands must require explicit confirmation:
+Selecting `write` requests erase/program and verification. Backup is optional;
+`--dry-run` checks the plan without erase/program. The former `--yes` option
+has been removed at the user's request.
 
 ```console
-mstar-flasher write firmware.bin --yes
+mstar-cli write firmware.bin
+mstar-cli write firmware.bin --backup before-write.raw
+mstar-cli write firmware.bin --dry-run
 ```
-
-or interactive confirmation.
 
 Never make `probe` destructive.
 
@@ -1269,13 +1271,16 @@ Progress and remaining work (writing prioritized by the user):
    physical validation of the ECC profiles remains part of step 3.
 5. **Implement NAND erase/program/verify — implemented and offline-tested.**
    `write` selects the first detected programmer unless --serial is supplied.
-   It requires a new raw backup path and --yes (or --dry-run). Validate block alignment, inspect markers, compare the backup
-   with a second raw read, erase/program full pages, and verify every byte.
+   Backup is optional via --backup PATH; --yes has been removed. Without
+   --dry-run, write erases/programs after preflight and verifies every byte.
+   Validate block alignment and inspect markers. When requested, save a new
+   raw backup and compare it with a second raw read before erasing.
+   Without backup, skip those full-page passes; read preserved tails as needed.
    Preserve fixed addresses: marked blocks abort rather than being skipped.
    Check WEL/E-FAIL/P-FAIL, never retry ambiguous mutations, and restore flash
    settings on failure. Standalone `verify` performs ECC-checked comparison.
-   Vendor multi-image configs are supported by --config: validate and back up
-   all ranges before erasing, fill final-block tails with FF or preserve their
+   Vendor multi-image configs are supported by --config: validate all ranges
+   and finish any requested backup before erasing, fill final-block tails with FF or preserve their
    main bytes with --preserve-gaps, and leave whole intervening blocks untouched.
    See [WRITING.md](WRITING.md) for backup format, limits and bad-block tests.
    Hardware programming validation and automatic raw restore remain pending.
@@ -1397,12 +1402,12 @@ read/ECC validation remains pending; that status is tracked separately.
 
 **Status: write/verify implemented and offline-tested; hardware programming pending.**
 
-- [x] Add `write` with optional serial, new backup path and --yes confirmation.
+- [x] Add `write` with optional serial and optional new backup path; no --yes flag.
 - [x] Support vendor filename/offset configs, repeated files and sparse backups.
 - [x] Add --preserve-gaps for partial-block main bytes in config writes.
-- [x] Add --dry-run for marker checks and verified backup without erase/program.
+- [x] Add --dry-run for marker checks, preserved-tail reads and optional verified backup without erase/program.
 - [x] Validate block-aligned input/range and require repeated matching JEDEC ID.
-- [x] Back up raw main+OOB, close the files and compare against a second read.
+- [x] With --backup, save raw main+OOB, close the files and compare against a second read.
 - [x] Erase required blocks and program full pages in ascending order.
 - [x] Check write-enable and erase/program status; never retry failed mutations.
 - [x] Verify every image byte and return non-zero on mismatch or cleanup failure.
@@ -1443,7 +1448,8 @@ When initializing this project:
 4. `mstar-core` must have zero dependency on FTDI or libusb.
 5. Use RAII for every FTDI/I²C handle.
 6. Use `std::expected` for recoverable errors.
-7. Keep hardware write/erase opt-in and backed up/verified. The user-authorized
+7. Selecting write requests erase/program; --dry-run skips it. Backup is optional
+   and readback verification remains mandatory. The user-authorized
    implementation priority and pending hardware acceptance are tracked in section 22.
 8. Make protocol layers testable with `MockI2cMaster`.
 9. Write unit tests for exact MStar I²C transaction sequences before hardware testing.
@@ -1452,7 +1458,7 @@ When initializing this project:
 12. Keep ISP addresses and I²C frequency configurable.
 13. Do not hard-code a particular FTDI USB index.
 14. Prefer small focused classes over a single large flasher class.
-15. Every destructive feature must be explicitly opt-in.
+15. Destructive work requires selecting its command; write supports --dry-run.
 
 The first Copilot implementation task is:
 

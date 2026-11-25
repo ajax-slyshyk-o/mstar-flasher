@@ -18,6 +18,8 @@ struct FtdiI2c::Impl {
     uint8_t featureAddress = 0;
     uint8_t config = 0x10;
     unsigned configWrites = 0;
+    unsigned rawPageReads = 0;
+    unsigned mainReadsBeforeErase = 0;
     uint32_t page = 0;
     bool pageLoaded = false;
 
@@ -69,6 +71,8 @@ FtdiI2c::~FtdiI2c() {
         const auto& m = *impl_->model;
         fmt::println(stderr, "MODEL erases={} programs={} config={:02X} protection={:02X} wel={}",
                      m.erases, m.programs, m.config, m.protection, m.wel ? 1 : 0);
+        fmt::println(stderr, "MODEL_READS raw_pages={} main_before_erase={}",
+                     impl_->rawPageReads, impl_->mainReadsBeforeErase);
         if (impl_->scenario == "write-config-ff" || impl_->scenario == "write-config-preserve") {
             // Independent expected memory map for the CLI config fixture:
             // abc at 0 and 128 KiB; 128 KiB+1 of B at 512 KiB. Gaps untouched.
@@ -107,6 +111,7 @@ Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
         if (s == "write-config-bad-later") m.mark(4);
         if (s == "write-config-bad-gap") m.mark(2);
         if (s == "write-config-backup-later") m.failReadPage = 4 * 64 + 3;
+        if (s == "write-config-preserve-later") m.failReadPage = 5 * 64 + 3;
         if (s == "write-marker-error") m.failOpcode = 0x03;
         if (s == "write-wel") m.ignoreWren = true;
         if (s == "write-protected") m.ignoreUnlock = true;
@@ -176,6 +181,12 @@ Result<void> FtdiI2c::read(uint8_t, std::span<uint8_t> data) {
 }
 Result<void> FtdiI2c::writeRead(uint8_t, std::span<const uint8_t>, std::span<uint8_t> rx) {
     if (impl_->model) {
+        if (!impl_->pending.empty() && impl_->pending[0] == 0x03) {
+            const auto pageSize = impl_->model->part.geometry.pageSize;
+            if (rx.size() > pageSize) ++impl_->rawPageReads;
+            if (rx.size() == pageSize && impl_->model->erases == 0)
+                ++impl_->mainReadsBeforeErase;
+        }
         impl_->executed = true;
         return impl_->model->transaction(impl_->pending, rx);
     }

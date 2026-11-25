@@ -160,29 +160,35 @@ General OOB image handling, bad-block remapping, and SPI-NOR reads remain pendin
 ## Writing and verifying a NAND image
 
 `write` accepts a main-area image with block-aligned size and offset. It checks
-bad-block markers, saves and compares a raw main+OOB backup, erases/programs the
-requested blocks, and verifies every image byte through ECC-checked reads.
+bad-block markers, erases/programs the requested blocks, and verifies every
+image byte through ECC-checked reads. Add `--backup PATH` to save and compare
+a raw main+OOB backup before erasing.
 Marked blocks abort the operation; image addresses are not shifted.
 
 ```console
-./build/linux/mstar-cli write firmware.bin --serial ggggggggA --backup before-test.raw --dry-run
-./build/linux/mstar-cli write firmware.bin --serial ggggggggA --backup before-write.raw --yes
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA --dry-run
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA
+./build/linux/mstar-cli write firmware.bin --serial ggggggggA --backup before-write.raw
 ./build/linux/mstar-cli verify firmware.bin --serial ggggggggA
 ```
 
 `--serial` is optional for `write`, including `--dry-run`: when omitted, the
 first detected programmer is selected. Supply it to select a specific device.
-Each write/dry-run requires a new backup path and also creates `PATH.json`.
+`write` programs by default; `--dry-run` checks the plan and markers without
+programming. `--yes` has been removed. Backup is optional for both modes;
+when supplied, `--backup PATH` requires a new path and also creates `PATH.json`.
 To write several images, use the vendor `filename : offset` config format:
 
 ```console
-./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg --backup before-config.raw --yes
+./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg
 ```
 
 Image paths are relative to the config directory. Config writes fill the rest
 of each image's last block with `0xFF`; add `--preserve-gaps` to retain those
-existing main-area bytes. Whole blocks between images stay untouched. All
-affected blocks are backed up before any erase. `--dry-run` is also supported.
+existing main-area bytes. Whole blocks between images stay untouched. Preserved
+tails are read before any erase, including when backup is omitted. With
+`--backup`, all affected blocks are backed up and compared before any erase.
+`--dry-run` performs these preflight steps and any requested backup, then stops.
 
 The backup includes spare/parity bytes and cannot be passed directly to `write`.
 Main-area programming regenerates ECC but does not preserve user OOB metadata.
