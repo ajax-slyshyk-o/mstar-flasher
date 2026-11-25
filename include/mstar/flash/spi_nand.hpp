@@ -83,6 +83,7 @@ private:
     uint8_t changedConfigMask_ = 0;
     uint8_t configWriteMask_ = 0xFF;
     bool rawEccPending_ = false;
+    uint8_t rawConfigBefore_ = 0;
     bool writeConfigured_ = false;
     bool writeTouched_ = false;
     uint8_t originalProtection_ = 0;

@@ -23,9 +23,12 @@ public:
     bool ignoreWren = false, ignoreUnlock = false, ignoreProtectionRestore = false;
     bool failErase = false, failProgram = false, corruptVerify = false;
     bool failRawRestore = false, backupDrift = false, uncorrectable = false;
+    bool ignoreRawDisable = false;
     bool stuckBusy = false;
     bool busyAfterErase = false, busyAfterProgram = false;
     std::optional<uint8_t> failOpcode;
+    std::optional<uint32_t> failReadPage;
+    std::optional<uint8_t> rawRestoreReadback;
     bool failureAfterEffect = false;
     bool failureUsed = false;
     unsigned erases = 0, programs = 0;
@@ -68,6 +71,7 @@ private:
     uint32_t loadedPage = 0;
     bool programLoaded = false;
     bool wasRaw = false;
+    bool rawCacheRead = false;
     std::vector<uint8_t> cache;
     static std::unexpected<Error> failure(std::string message) {
         return std::unexpected(Error{ErrorCode::I2cTransfer, std::move(message)});
@@ -82,7 +86,14 @@ private:
             break;
         case 0x0F:
             if (tx.size() != 2 || rx.size() != 1) return failure("invalid GET FEATURE");
-            if (tx[1] == 0xB0) rx[0] = config;
+            if (tx[1] == 0xB0) {
+                rx[0] = config;
+                if (rawCacheRead && rawRestoreReadback) {
+                    rx[0] = *rawRestoreReadback;
+                    rawRestoreReadback.reset();
+                }
+                rawCacheRead = false;
+            }
             if (tx[1] == 0xA0) rx[0] = protection;
             if (tx[1] == 0xC0) {
                 rx[0] = status | (wel ? 2 : 0);
@@ -93,6 +104,7 @@ private:
         case 0x1F:
             if (tx.size() != 3) return failure("invalid SET FEATURE");
             if (tx[1] == 0xB0) {
+                if (ignoreRawDisable && !(tx[2] & 0x10)) break;
                 if (failRawRestore && wasRaw && (tx[2] & 0x10)) return failure("injected raw ECC restore failure");
                 config = tx[2];
                 if (!(config & 0x10)) wasRaw = true;
@@ -108,6 +120,7 @@ private:
         case 0x13:
             if (tx.size() != 4) return failure("invalid PAGE READ");
             loadedPage = row();
+            if (failReadPage == loadedPage) return failure("injected page read failure");
             cache = contents(loadedPage);
             if (!(config & 0x10) && backupDrift && ++rawReads[loadedPage] >= 3) cache[3] ^= 1;
             if (programs && corruptVerify) cache[0] ^= 1;
@@ -120,6 +133,7 @@ private:
             const auto column = (unsigned(tx[1]) << 8) | tx[2];
             if (column + rx.size() > cache.size()) return failure("cache read out of bounds");
             std::copy_n(cache.begin() + column, rx.size(), rx.begin());
+            if (!(config & 0x10)) rawCacheRead = true;
             break;
         }
         case 0xD8: {

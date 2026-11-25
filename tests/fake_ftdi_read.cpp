@@ -69,6 +69,25 @@ FtdiI2c::~FtdiI2c() {
         const auto& m = *impl_->model;
         fmt::println(stderr, "MODEL erases={} programs={} config={:02X} protection={:02X} wel={}",
                      m.erases, m.programs, m.config, m.protection, m.wel ? 1 : 0);
+        if (impl_->scenario == "write-config-ff" || impl_->scenario == "write-config-preserve") {
+            // Independent expected memory map for the CLI config fixture:
+            // abc at 0 and 128 KiB; 128 KiB+1 of B at 512 KiB. Gaps untouched.
+            bool correct = m.erased == std::set<uint32_t>{0, 1, 4, 5};
+            const bool preserve = impl_->scenario == "write-config-preserve";
+            for (uint32_t page = 0; page < 7 * 64; ++page) {
+                const auto data = m.contents(page);
+                for (uint32_t i = 0; i < 2048; ++i) {
+                    const uint32_t address = page * 2048 + i;
+                    uint8_t expected = static_cast<uint8_t>(page * 17 + i);
+                    if (!preserve && m.erased.contains(page / 64)) expected = 0xFF;
+                    if (address < 3) expected = "abc"[address];
+                    if (address >= 131072 && address < 131075) expected = "abc"[address - 131072];
+                    if (address >= 524288 && address < 655361) expected = 'B';
+                    if (data[i] != expected) correct = false;
+                }
+            }
+            fmt::println(stderr, "CONFIG_AUDIT={}", correct ? "ok" : "failed");
+        }
     }
 }
 
@@ -85,6 +104,9 @@ Result<FtdiI2c> FtdiI2c::open(const ProgrammerSelector& selector) {
         if (s == "write-gv") m.select(NandEccProfile::W25n01gv);
         if (s == "write-bad-first") m.mark(0);
         if (s == "write-bad-second") m.mark(0, 1);
+        if (s == "write-config-bad-later") m.mark(4);
+        if (s == "write-config-bad-gap") m.mark(2);
+        if (s == "write-config-backup-later") m.failReadPage = 4 * 64 + 3;
         if (s == "write-marker-error") m.failOpcode = 0x03;
         if (s == "write-wel") m.ignoreWren = true;
         if (s == "write-protected") m.ignoreUnlock = true;

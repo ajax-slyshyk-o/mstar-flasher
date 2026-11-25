@@ -2,13 +2,16 @@
 
 Writing is implemented for the five NAND profiles in [ECC.md](ECC.md), with
 offline tests. No erase/program command has been run on the connected board.
+Short marker scans have succeeded on the W25N02KV board, but a complete backup
+dry run still encounters intermittent register/identification failures; see
+[the hardware investigation](HARDWARE.md#config-write-investigation--2026-11-25).
 The user's requested priority is to develop writing now and leave SPI-NOR for
 later; incomplete bench acceptance does not prevent this software work.
 
 ## Commands
 
 The first implementation accepts main-area images at fixed device addresses.
-For `write`, both the image size and offset must be whole erase blocks (currently
+For single-image `write`, both the image size and offset must be whole erase blocks (currently
 128 KiB). `verify` requires page alignment (currently 2 KiB). Empty images,
 out-of-range requests and unaligned requests are rejected. There is no implicit
 padding, block skipping, remapping, or preservation of bytes outside a partial
@@ -35,6 +38,54 @@ even if `--yes` is also present. Both commands accept `--trace-i2c`,
 `--i2c-address`, `--i2c-clock`, and `--stay-in-isp`. The last option omits ISP
 exit but still restores flash settings. Success is exit 0; any failure is nonzero.
 There is no standalone CLI `erase` or raw/OOB programming command yet.
+
+## Vendor multi-image configs
+
+`write --config FILE` accepts the supplied `OnebinnandBurnImgConfig.cfg` format:
+
+```text
+cis.bin : 0x00000
+cis.bin : 0x20000
+IPL.cipher2.sig.bin : 0x140000
+IPL_CUST.cipher2.sig.bin : 0x1A0000
+u-boot_spinand.xz.img.sig.bin : 0x200000
+```
+
+```sh
+./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg \
+    --backup before-config.raw --yes
+
+# Preserve bytes after each file within its last erase block:
+./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg \
+    --preserve-gaps --backup before-preserved-write.raw --yes
+```
+
+Use `--dry-run` instead of `--yes` to check the complete plan and save/compare
+its backup without erasing/programming. The config replaces the positional
+image and `--offset`; combining them is an error. `--preserve-gaps` requires
+`--config`. Programmer selection and other write options work as above.
+
+Paths are resolved relative to the config's directory. Spaces, optionally
+double-quoted paths and Windows backslash separators are accepted. Offsets are
+decimal or `0x`/`0X` hexadecimal. Blank lines, full-line `#`/`;` comments,
+CRLF and a UTF-8 BOM are accepted. Each other line must contain exactly a
+filename and offset separated by the final colon; trailing comments are not
+accepted. Repeating an image at different addresses is supported.
+
+Config offsets must be erase-block aligned. File sizes need not be aligned:
+by default, the remainder of each file's final block is filled with `0xFF`.
+With `--preserve-gaps`, those main-area bytes are read with ECC and included in
+the programmed data instead. Both policies leave **whole blocks between image
+ranges untouched**. Neither policy preserves OOB metadata in rewritten blocks;
+on-chip ECC parity is regenerated. Overlapping erase ranges are rejected,
+including duplicate addresses and overlaps caused by rounding file sizes up.
+
+All files are loaded before opening the programmer. After identification, all
+ranges are validated, sorted by address, checked for bad-block markers, backed
+up and compared before the first erase. The write verifies every byte in all
+affected blocks, including filled or preserved tails. A failure stops the batch;
+previously programmed blocks are not rolled back. Config syntax compatibility
+does not add vendor-specific CIS generation, bad-block remapping or OOB formats.
 
 ## Write workflow
 
@@ -68,8 +119,16 @@ explicit OOB metadata or a different bad-block mapping policy.
 - `PATH`: headerless pages in ascending device-address order, each containing
   `page_size` raw main bytes followed by `physical_oob_size` raw spare bytes.
   ECC is disabled temporarily for each raw read and then restored/verified.
-- `PATH.json`: format `mstar-raw-pages-v1`, part/JEDEC identity, main-area offset
+- `PATH.json` for single-image writes: format `mstar-raw-pages-v1`, part/JEDEC identity, main-area offset
   and size, page/spare sizes, pages per block, and the backup ECC mode.
+
+Config writes use manifest format `mstar-raw-ranges-v2`. The raw file contains
+only affected blocks, concatenated in ascending device-address order. The
+manifest includes the same part/geometry fields, `config`, `tail_policy`
+(`fill-ff` or `preserve`) and a `ranges` array. Each entry records `image`,
+`image_size` (original bytes), `main_area_offset`, `main_area_size` (whole
+blocks), `backup_offset` and `backup_size` (byte offsets/sizes in the raw file).
+Do not interpret this sparse backup as one contiguous device range.
 
 The backup covers the image range, not the entire device. Its expected length
 is `(main_area_size / page_size) * (page_size + physical_oob_size)`. It contains
@@ -90,6 +149,12 @@ implementation neither edits those links nor claims access to hidden/remapped
 physical blocks. It does not infer that unmarked blocks are healthy: operation
 status and readback must also succeed.
 
+Raw-read setup/restoration failures report `B0` register values. Unexpected
+mode/lock bits abort without being copied into a feature-register write. Raw
+cleanup verifies all defined configuration bits, not only ECC, and retains
+pending restoration on failure. These checks do not suppress or automatically
+retry an unreliable connection.
+
 ## Testing bad-block handling
 
 Offline tests inject non-`FFh` spare markers on the first or second page, as well
@@ -102,6 +167,12 @@ cache replacement, 1-to-0 programming behavior, neighboring-block preservation,
 status failures, busy timeouts, failed acknowledgements, and verification
 mismatches. CLI tests run the real CLI/ISP code against this model, checking the
 backup bytes/manifest, confirmation, alignment, error exits and cleanup.
+Config tests also inspect the model's final bytes independently: repeated
+images, partial pages, multi-block files, both tail policies and untouched
+gaps. Missing/malformed inputs, overlaps, bad markers in later ranges and late
+backup read failures abort before any erase. The supplied five-entry config
+and its actual files were exercised with simulated programming/readback;
+that is not a hardware or vendor-tool equivalence test.
 
 For hardware, first inspect existing markers using a reference tool and compare
 the result with our write dry run over that range. The dry run reports the first

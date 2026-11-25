@@ -29,13 +29,21 @@ Result<void> SpiNand::restoreRawEcc() {
     if (!rawEccPending_) return {};
     auto config = getFeature(0xB0);
     if (!config) return std::unexpected(config.error());
+    const uint8_t unchangedMask = configWriteMask_ & ~0x10;
+    if ((*config & unchangedMask) != (rawConfigBefore_ & unchangedMask))
+        return fail(ErrorCode::FlashProtocol, fmt::format(
+            "Raw-read configuration changed before ECC restoration: B0 before={:#04x}, read={:#04x}; refusing to rewrite unexpected mode/lock bits",
+            rawConfigBefore_, *config));
     if (!(*config & 0x10)) {
-        if (auto r = setFeature(0xB0, (*config | 0x10) & configWriteMask_); !r) return r;
+        if (auto r = setFeature(0xB0, rawConfigBefore_ & configWriteMask_); !r) return r;
         if (auto r = waitReady(); !r) return std::unexpected(r.error());
         config = getFeature(0xB0);
         if (!config) return std::unexpected(config.error());
     }
-    if (!(*config & 0x10)) return fail(ErrorCode::FlashProtocol, "Failed to restore ECC after raw read");
+    if ((*config & configWriteMask_) != (rawConfigBefore_ & configWriteMask_))
+        return fail(ErrorCode::FlashProtocol, fmt::format(
+            "Failed to restore ECC after raw read: B0 expected={:#04x}, read={:#04x}",
+            rawConfigBefore_ & configWriteMask_, *config));
     rawEccPending_ = false;
     return {};
 }
@@ -47,6 +55,13 @@ Result<void> SpiNand::readRawSlice(uint32_t page, uint16_t column, std::span<uin
     if (auto r = checkReadConfiguration(); !r) return r;
     auto config = getFeature(0xB0);
     if (!config) return std::unexpected(config.error());
+    const uint8_t required = readPart_->eccProfile == NandEccProfile::Gd5f2gm7 ? 0x10 : 0x18;
+    const uint8_t prepared = (originalConfig_ | required) & configWriteMask_;
+    if ((*config & configWriteMask_) != prepared)
+        return fail(ErrorCode::FlashProtocol, fmt::format(
+            "Configuration changed before raw read for {} at page {}: B0 expected={:#04x}, read={:#04x}",
+            readPart_->model, page, prepared, *config));
+    rawConfigBefore_ = *config;
     rawEccPending_ = true; // a failed feature write may still reach the chip
     auto result = [&]() -> Result<void> {
         if (auto r = setFeature(0xB0, (*config & ~0x10) & configWriteMask_); !r) return r;
@@ -54,8 +69,11 @@ Result<void> SpiNand::readRawSlice(uint32_t page, uint16_t column, std::span<uin
         auto actual = getFeature(0xB0);
         if (!actual) return std::unexpected(actual.error());
         // Preserve the previously verified read mode and all defined settings.
-        if ((*actual & configWriteMask_) != ((*config & ~0x10) & configWriteMask_))
-            return fail(ErrorCode::FlashProtocol, "Failed to verify raw-read configuration");
+        const uint8_t expected = (*config & ~0x10) & configWriteMask_;
+        if ((*actual & configWriteMask_) != expected)
+            return fail(ErrorCode::FlashProtocol, fmt::format(
+                "Failed to verify raw-read configuration for {} at page {}: B0 before={:#04x}, written={:#04x}, read={:#04x}, mask={:#04x}",
+                readPart_->model, page, *config, expected, *actual, configWriteMask_));
         if (auto r = bus_->transaction(rowCommand(0x13, page), {}); !r) return r;
         if (auto r = waitReady(); !r) return std::unexpected(r.error());
         const std::array<uint8_t, 4> command{0x03, static_cast<uint8_t>(column >> 8),

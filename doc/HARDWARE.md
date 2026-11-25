@@ -1,5 +1,83 @@
 # Hardware acceptance
 
+## Config-write investigation — 2026-11-25
+
+The user's five-entry vendor config reached identification of **Winbond
+W25N02KV (`EF AA 22`)**, then failed at raw-read setup before any backup was
+verified or any block erased. The diagnostic now prints the part/page and
+`B0` values before the change, written, and read back.
+
+Consecutive identification attempts did help: three invalid IDs were followed
+by three valid probes using `--stay-in-isp`. Three subsequent scans of blocks
+0, 1, 10, 13, 16, 17 and 18 at 100 kHz all returned unmarked and restored ECC.
+In those scans `B0=19h` changed to `09h` for raw reads and back to `19h`.
+This confirms that the requested raw-read mode can work on this target.
+It does not establish that keeping ISP active alone caused the improvement.
+
+Other attempts still returned invalid JEDEC values or inconsistent `B0` values
+during marker scans. One cleanup read returned `A1h` when `09h` was expected;
+a later attempt read `24h` after writing `19h`, followed by `9Ah` on cleanup.
+The full config backup dry run did not complete. Short attempts at 10/20 kHz
+received an address NACK. No erase/program commands were issued. The final
+flash configuration cannot be inferred from inconsistent readbacks; power-cycle
+the board before the next independently captured session.
+
+Code changes reject unexpected defined configuration bits before raw setup or
+restoration, never feed suspect mode/lock bits back into SET FEATURE, and verify
+the complete defined configuration on restoration. Pending restoration remains
+tracked after failure. Fault-injection tests cover these cases, including a
+rejected ECC-off write. These are diagnostic/cleanup fixes, not a demonstrated
+fix for the intermittent connection.
+
+Local reference comparison:
+
+- `../github/mstar/microsnander` at `d15a96f`, `src/sigmastar.c`: conditional
+  `SERDB` initialization at `59h` before `MSTAR` at `49h`; PM UART RX setup;
+  separate I2C write/read transactions for command `11h`; sends `11h` only
+  once per SPI transaction. Our code uses a repeated START and has no SERDB
+  setup. Neither difference is proven to cause this failure.
+- The same project's `src/spi_nand_flash.c` uses `B0h` bit 4 for this chip's
+  ECC and batches marker scans with ECC off. Its setter reads back the feature
+  but does not reject a value mismatch.
+- `../github/mstar/SNANDer` at `5fbd17f` has direct CH341A support, not the
+  SigmaStar bridge. It also changes ECC through `B0h` bit 4; readback is printed
+  rather than checked for the requested value. Its Winbond unlock sequence
+  changes additional register/OTP-mode bits and was not adopted.
+
+A temporary diagnostic tried microsnander's SERDB/PM-UART setup. The writes
+reported success, but the UART register readback was `FFh`, not zero. The
+diagnostic aborted and sent debug-port exit commands; the sequence was not
+added to the production connection path. References describe the UART pins
+also serving ISP: [linux-chenxing ISP notes](https://linux-chenxing.org/isp/) and
+[microsnander source](https://github.com/OpenIPC/microsnander/blob/d15a96fcf840f0644ac7945e6a3e759b4c208dd2/src/sigmastar.c).
+
+Traces and the temporary diagnostic source are retained under ignored
+`build/hardware-acceptance/2026-11-25/`. The earlier acceptance record below is
+historical; initial identification and short marker reads have since succeeded,
+while stable complete reads and programming acceptance remain pending.
+
+### Next comparison: vendor application on Windows
+
+Capture from application startup through a successful connection/JEDEC read
+and a small flash read. Keep both a failed attempt and the following successful
+attempt when possible. Erase/program is not needed for this comparison.
+
+Record the executable/DLL versions and loaded DLL paths, then capture:
+
+- FTDI open/selection, reset/purge, bit mode, latency, USB transfer sizes and
+  timeouts (`FT_Open*`, `FT_ResetDevice`, `FT_Purge`, `FT_SetBitMode`,
+  `FT_SetLatencyTimer`, `FT_SetUSBParameters`, `FT_SetTimeouts`).
+- `FT_Write` payloads before the call; `FT_Read` payloads after return. Keep
+  requested and actual byte counts, status codes, timestamps and handle IDs.
+- If LibMPSSE is used: `I2C_OpenChannel`, `I2C_InitChannel` configuration,
+  `I2C_DeviceWrite`/`I2C_DeviceRead` addresses, lengths, option flags, buffers
+  and return status.
+
+Function names alone are insufficient. The payloads reveal MPSSE timing,
+START/STOP/repeated-START behavior, reads at `49h`/`59h`, SERDB activation,
+MCU/UART control, and any register-setting or retry differences. Select a
+capture tool after checking the application's architecture and loaded DLLs.
+
 ## Status — 2026-11-24
 
 **Partial: USB setup and enumeration pass; target identification and complete

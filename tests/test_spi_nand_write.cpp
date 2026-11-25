@@ -118,6 +118,63 @@ TEST_CASE("Failed raw ECC restoration blocks further reads and writes", "[nand_w
     CHECK(bus.config == 0x10);
 }
 
+TEST_CASE("Raw ECC cleanup rejects unexpected register bits without writing them back", "[nand_write]") {
+    NandModel bus;
+    bus.select(NandEccProfile::W25n02kv);
+    small(bus);
+    bus.config = 0x19; // ECC, buffer mode, HOLD disable; observed on the board.
+    bus.rawRestoreReadback = GENERATE(uint8_t{0xA1}, uint8_t{0x01}, uint8_t{0x11});
+    SpiNand nand(bus);
+    REQUIRE(nand.configureRead(bus.part));
+    std::array<uint8_t, 24> raw{};
+    auto result = nand.readRawPage(0, raw);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().message.find("configuration changed") != std::string::npos);
+    // Only the initial ECC-off write is allowed; never copy suspect lock/mode
+    // bits from a faulty register read into SET FEATURE.
+    CHECK(count(bus, 0x1F) == 1);
+    CHECK(bus.config == 0x09);
+    CHECK_FALSE(nand.configureWrite());
+    REQUIRE(nand.restoreReadConfiguration()); // the next read is valid again
+    CHECK(bus.config == 0x19);
+    CHECK(bus.erases == 0);
+    CHECK(bus.programs == 0);
+}
+
+TEST_CASE("Rejected ECC-off setup reports register values and never reads raw data", "[nand_write]") {
+    NandModel bus;
+    bus.select(NandEccProfile::W25n02kv);
+    small(bus);
+    bus.config = 0x19;
+    bus.ignoreRawDisable = true;
+    SpiNand nand(bus);
+    REQUIRE(nand.configureRead(bus.part));
+    std::array<uint8_t, 24> raw{};
+    auto result = nand.readRawPage(0, raw);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().message.find("B0 before=0x19, written=0x09, read=0x19") != std::string::npos);
+    CHECK(count(bus, 0x13) == 0);
+    CHECK(count(bus, 0x03) == 0);
+    CHECK(count(bus, 0x1F) == 1); // no automatic replay of a failed setting
+    REQUIRE(nand.restoreReadConfiguration());
+    CHECK(bus.config == 0x19);
+}
+
+TEST_CASE("Raw setup refuses unexpected lock bits even with ECC and buffer mode enabled", "[nand_write]") {
+    NandModel bus;
+    bus.select(NandEccProfile::W25n02kv);
+    small(bus);
+    bus.config = 0x19;
+    SpiNand nand(bus);
+    REQUIRE(nand.configureRead(bus.part));
+    bus.config = 0xB9;
+    auto result = nand.isBadBlock(0);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().message.find("B0 expected=0x19, read=0xb9") != std::string::npos);
+    CHECK(count(bus, 0x1F) == 0);
+    CHECK(count(bus, 0x13) == 0);
+}
+
 TEST_CASE("Write protection and WEL failures prevent erase", "[nand_write]") {
     NandModel bus;
     small(bus);

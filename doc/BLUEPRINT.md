@@ -1198,7 +1198,7 @@ Use for the eventual CH341 backend.
 
 ## 22. Implementation milestones
 
-### Current progress and next steps (2026-11-24)
+### Current progress and next steps (2026-11-25)
 
 Implementation and hardware acceptance are tracked separately. Current user
 priority: implement NAND writing now; SPI-NOR can wait. Intermittent initial
@@ -1249,7 +1249,10 @@ Progress and remaining work (writing prioritized by the user):
    Bench probes return unstable, unknown JEDEC IDs; a reserved-address negative
    control unexpectedly ACKs. A user-coordinated power-cycle retry also failed;
    stopping the board before Linux starts could not be confirmed. The user
-   reports Winbond flash, but the exact part and wiring remain unverified.
+   reports Winbond flash. On 2026-11-25, repeated probes identified W25N02KV
+   and three short marker scans passed; complete backup dry runs still failed
+   intermittently. See the updated hardware investigation and Windows capture
+   plan. Wiring and sustained-read/program acceptance remain unverified.
    No logic analyzer is connected and no dumps were attempted. See
    [HARDWARE.md](HARDWARE.md) for commands, results and the remaining procedure:
    establish reliable identification, verify START/address/ACK/STOP and repeated
@@ -1271,6 +1274,9 @@ Progress and remaining work (writing prioritized by the user):
    Preserve fixed addresses: marked blocks abort rather than being skipped.
    Check WEL/E-FAIL/P-FAIL, never retry ambiguous mutations, and restore flash
    settings on failure. Standalone `verify` performs ECC-checked comparison.
+   Vendor multi-image configs are supported by --config: validate and back up
+   all ranges before erasing, fill final-block tails with FF or preserve their
+   main bytes with --preserve-gaps, and leave whole intervening blocks untouched.
    See [WRITING.md](WRITING.md) for backup format, limits and bad-block tests.
    Hardware programming validation and automatic raw restore remain pending.
    SPI-NOR, UART and CH341 remain later work.
@@ -1392,6 +1398,8 @@ read/ECC validation remains pending; that status is tracked separately.
 **Status: write/verify implemented and offline-tested; hardware programming pending.**
 
 - [x] Add `write` with optional serial, new backup path and --yes confirmation.
+- [x] Support vendor filename/offset configs, repeated files and sparse backups.
+- [x] Add --preserve-gaps for partial-block main bytes in config writes.
 - [x] Add --dry-run for marker checks and verified backup without erase/program.
 - [x] Validate block-aligned input/range and require repeated matching JEDEC ID.
 - [x] Back up raw main+OOB, close the files and compare against a second read.

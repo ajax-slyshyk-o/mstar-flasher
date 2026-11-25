@@ -39,7 +39,7 @@ target_link_libraries(mstar-core PUBLIC
     nlohmann_json::nlohmann_json 
     serdepp::serdepp)
 
-add_executable(mstar-cli src/app/main.cpp src/app/write_commands.cpp)
+add_executable(mstar-cli src/app/main.cpp src/app/write_commands.cpp src/app/write_plan.cpp)
 target_link_libraries(mstar-cli PRIVATE mstar-core CLI11::CLI11)
 
 if(MSTAR_ENABLE_FTDI)
@@ -104,7 +104,7 @@ if(MSTAR_BUILD_TESTS)
 
     # Exercise real CLI parsing, exit codes and file I/O with a fake programmer.
     # This target never links the hardware backend, even in FTDI-enabled builds.
-    add_executable(mstar-cli-read-tests src/app/main.cpp src/app/write_commands.cpp tests/fake_ftdi_read.cpp)
+    add_executable(mstar-cli-read-tests src/app/main.cpp src/app/write_commands.cpp src/app/write_plan.cpp tests/fake_ftdi_read.cpp)
     target_compile_definitions(mstar-cli-read-tests PRIVATE MSTAR_ENABLE_FTDI)
     target_link_libraries(mstar-cli-read-tests PRIVATE mstar-core CLI11::CLI11)
     add_test(NAME mstar-read-cli

@@ -1,4 +1,5 @@
 #include "write_commands.hpp"
+#include "write_plan.hpp"
 
 #include <algorithm>
 #include <array>
@@ -20,6 +21,7 @@
 namespace {
 struct Options {
     std::string image;
+    std::string config;
     std::string backup;
     std::string serial;
     uint64_t offset = 0;
@@ -27,6 +29,7 @@ struct Options {
     uint32_t clock = 100000;
     bool yes = false;
     bool dryRun = false;
+    bool preserveGaps = false;
     bool trace = false;
     bool stay = false;
 };
@@ -39,23 +42,20 @@ int runImage(const Options& options, bool writing) {
     }
     // Snapshot the input before touching hardware; a file change during backup
     // cannot change the bytes that are programmed or verified.
-    std::ifstream input(options.image, std::ios::binary | std::ios::ate);
-    if (!input) { fmt::println(stderr, "Cannot open image: {}", options.image); return 1; }
-    const auto length = input.tellg();
     uint64_t maximum = 0;
     for (const auto& part : mstar::builtinFlashTable()) {
         const auto& g = part.geometry;
         maximum = std::max(maximum, uint64_t(g.pageSize) * g.pagesPerBlock * g.blocksPerLun * g.luns);
     }
-    if (length <= 0 || static_cast<uint64_t>(length) > maximum) {
-        fmt::println(stderr, "Image must be nonempty and no larger than a supported flash ({} bytes)", maximum);
+    mstar::Result<std::vector<mstar::app::WriteImage>> loaded;
+    try {
+        loaded = mstar::app::loadWriteImages(options.image, options.config, options.offset, maximum);
+    } catch (const std::exception& error) {
+        fmt::println(stderr, "Cannot load images: {}", error.what());
         return 1;
     }
-    std::vector<uint8_t> image(static_cast<size_t>(length));
-    input.seekg(0);
-    input.read(reinterpret_cast<char*>(image.data()), static_cast<std::streamsize>(image.size()));
-    if (!input) { fmt::println(stderr, "Failed to read complete input image"); return 1; }
-    input.close();
+    if (!loaded) { fmt::println(stderr, "{}", loaded.error().message); return 1; }
+    auto images = std::move(*loaded);
     if (writing) {
         std::error_code error;
         for (const auto& path : {options.backup, options.backup + ".json"}) {
@@ -90,21 +90,42 @@ int runImage(const Options& options, bool writing) {
         const auto& g = part->geometry;
         const uint64_t blockBytes = uint64_t(g.pageSize) * g.pagesPerBlock;
         const uint64_t capacity = blockBytes * g.blocksPerLun * g.luns;
-        if (options.offset > capacity || image.size() > capacity - options.offset)
-            return error(mstar::ErrorCode::InvalidArgument, "Image range exceeds flash capacity");
-        const uint64_t alignment = writing ? blockBytes : g.pageSize;
-        if (options.offset % alignment || image.size() % alignment)
-            return error(mstar::ErrorCode::InvalidArgument,
-                         fmt::format("{} requires offset and image size aligned to {} bytes",
-                                     writing ? "Write" : "Verify", alignment));
+        if (auto r = mstar::app::prepareWriteImages(images, capacity,
+                writing ? blockBytes : g.pageSize, !options.config.empty(), writing); !r) return r;
         if (auto r = nand.configureRead(*part); !r) return r;
-        const auto firstPage = static_cast<uint32_t>(options.offset / g.pageSize);
-        const auto pageCount = static_cast<uint32_t>(image.size() / g.pageSize);
-        fmt::println("Flash: {} {}; {} bytes at offset {:#x}", part->vendor, part->model, image.size(), options.offset);
+        uint64_t totalBytes = 0;
+        fmt::println("Flash: {} {}", part->vendor, part->model);
+        if (!options.config.empty())
+            fmt::println("Config tail policy: {}; whole blocks between images are unchanged",
+                         options.preserveGaps ? "preserve existing main bytes" : "fill with FF");
+        for (const auto& image : images) {
+            fmt::println("Image: {}; {} bytes at offset {:#x}; {} bytes including padding",
+                         image.path.string(), image.sourceSize, image.offset, image.bytes.size());
+            totalBytes += image.bytes.size();
+        }
+        // One page list drives backup, programming and verification so sparse
+        // config ranges never erase or copy the whole span between images.
+        struct Page {
+            uint32_t number;
+            std::span<uint8_t> bytes;
+            size_t sourceBytes;
+        };
+        std::vector<Page> pages;
+        std::vector<uint32_t> blocks;
+        for (auto& image : images) {
+            const auto firstPage = static_cast<uint32_t>(image.offset / g.pageSize);
+            const auto pageCount = static_cast<uint32_t>(image.bytes.size() / g.pageSize);
+            for (uint32_t p = 0; p < pageCount; ++p) {
+                const size_t byteOffset = size_t(p) * g.pageSize;
+                const auto sourceBytes = byteOffset < image.sourceSize ?
+                    std::min<uint64_t>(g.pageSize, image.sourceSize - byteOffset) : 0;
+                pages.push_back({firstPage + p, std::span(image.bytes).subspan(byteOffset, g.pageSize),
+                                 static_cast<size_t>(sourceBytes)});
+                if (writing && p % g.pagesPerBlock == 0) blocks.push_back((firstPage + p) / g.pagesPerBlock);
+            }
+        }
         if (writing) {
-            const auto firstBlock = firstPage / g.pagesPerBlock;
-            const auto blockCount = pageCount / g.pagesPerBlock;
-            for (uint32_t block = firstBlock; block < firstBlock + blockCount; ++block) {
+            for (const auto block : blocks) {
                 auto bad = nand.isBadBlock(block);
                 if (!bad) return std::unexpected(bad.error());
                 if (*bad) return error(mstar::ErrorCode::BadBlock,
@@ -119,18 +140,43 @@ int runImage(const Options& options, bool writing) {
             nlohmann::json metadata{
                 {"format", "mstar-raw-pages-v1"}, {"vendor", part->vendor}, {"model", part->model},
                 {"jedec_id", std::vector<uint8_t>(part->id.begin(), part->id.begin() + part->idLength)},
-                {"main_area_offset", options.offset}, {"main_area_size", image.size()},
                 {"page_size", g.pageSize}, {"physical_oob_size", g.oobSize},
                 {"pages_per_block", g.pagesPerBlock}, {"ecc_enabled_during_backup", false}
             };
+            if (options.config.empty()) {
+                metadata["main_area_offset"] = images.front().offset;
+                metadata["main_area_size"] = images.front().bytes.size();
+            } else {
+                metadata["format"] = "mstar-raw-ranges-v2";
+                metadata["config"] = options.config;
+                metadata["tail_policy"] = options.preserveGaps ? "preserve" : "fill-ff";
+                metadata["ranges"] = nlohmann::json::array();
+                uint64_t backupOffset = 0;
+                for (const auto& image : images) {
+                    const uint64_t rawSize = (image.bytes.size() / g.pageSize) * (uint64_t(g.pageSize) + g.oobSize);
+                    metadata["ranges"].push_back({
+                        {"image", image.path.string()}, {"image_size", image.sourceSize},
+                        {"main_area_offset", image.offset}, {"main_area_size", image.bytes.size()},
+                        {"backup_offset", backupOffset}, {"backup_size", rawSize}
+                    });
+                    backupOffset += rawSize;
+                }
+            }
             manifest << metadata.dump(2) << '\n';
             manifest.flush();
             manifest.close();
             if (!manifest) return error(mstar::ErrorCode::Io, "Failed to write backup manifest");
             std::vector<uint8_t> page(g.pageSize), raw(size_t(g.pageSize) + g.oobSize);
-            for (uint32_t p = firstPage; p < firstPage + pageCount; ++p) {
+            for (const auto& planned : pages) {
+                const auto p = planned.number;
                 // Refuse unreadable source data rather than erasing the only copy.
                 if (auto r = nand.readPage(p, page); !r) return std::unexpected(r.error());
+                if (options.preserveGaps) {
+                    // Preserve ECC-corrected main bytes, not potentially faulty
+                    // raw bytes; parity is regenerated when the block is written.
+                    std::copy(page.begin() + planned.sourceBytes, page.end(),
+                              planned.bytes.begin() + planned.sourceBytes);
+                }
                 if (auto r = nand.readRawPage(p, raw); !r) return r;
                 backup.write(reinterpret_cast<const char*>(raw.data()), static_cast<std::streamsize>(raw.size()));
                 if (!backup) return error(mstar::ErrorCode::Io, "Failed to write raw backup; no blocks erased");
@@ -142,7 +188,8 @@ int runImage(const Options& options, bool writing) {
             std::ifstream saved(options.backup, std::ios::binary);
             if (!saved) return error(mstar::ErrorCode::Io, "Cannot reopen raw backup for verification");
             std::vector<uint8_t> savedPage(raw.size());
-            for (uint32_t p = firstPage; p < firstPage + pageCount; ++p) {
+            for (const auto& planned : pages) {
+                const auto p = planned.number;
                 saved.read(reinterpret_cast<char*>(savedPage.data()), static_cast<std::streamsize>(savedPage.size()));
                 if (!saved) return error(mstar::ErrorCode::Io, "Incomplete raw backup; no blocks erased");
                 if (auto r = nand.readRawPage(p, raw); !r) return r;
@@ -151,27 +198,26 @@ int runImage(const Options& options, bool writing) {
             }
             if (saved.peek() != std::char_traits<char>::eof() || saved.bad())
                 return error(mstar::ErrorCode::Io, "Unexpected raw backup length/read error");
-            fmt::println("Raw backup verified: {} (+ .json); {} block(s)", options.backup, blockCount);
+            fmt::println("Raw backup verified: {} (+ .json); {} block(s)", options.backup, blocks.size());
             if (options.dryRun) return {};
             if (auto r = nand.configureWrite(); !r) return r;
-            for (uint32_t block = firstBlock; block < firstBlock + blockCount; ++block) {
-                destructiveStarted = true; // even an unsuccessful erase may reach flash
-                if (auto r = nand.eraseBlock(block); !r) return r;
-                for (uint32_t p = block * g.pagesPerBlock; p < (block + 1) * g.pagesPerBlock; ++p) {
-                    auto bytes = std::span<const uint8_t>(image).subspan(size_t(p - firstPage) * g.pageSize, g.pageSize);
-                    if (auto r = nand.programPage(p, bytes); !r) return r;
+            for (const auto& planned : pages) {
+                if (planned.number % g.pagesPerBlock == 0) {
+                    destructiveStarted = true; // even an unsuccessful erase may reach flash
+                    if (auto r = nand.eraseBlock(planned.number / g.pagesPerBlock); !r) return r;
                 }
-                fmt::println("Programmed block {}", block);
+                if (auto r = nand.programPage(planned.number, planned.bytes); !r) return r;
+                if ((planned.number + 1) % g.pagesPerBlock == 0)
+                    fmt::println("Programmed block {}", planned.number / g.pagesPerBlock);
             }
         }
         uint32_t corrected = 0;
-        for (uint32_t p = firstPage; p < firstPage + pageCount; ++p) {
-            auto bytes = std::span<const uint8_t>(image).subspan(size_t(p - firstPage) * g.pageSize, g.pageSize);
-            auto result = nand.verifyPage(p, bytes);
+        for (const auto& planned : pages) {
+            auto result = nand.verifyPage(planned.number, planned.bytes);
             if (!result) return std::unexpected(result.error());
             if (result->state != mstar::EccState::Clean) ++corrected;
         }
-        fmt::println("Compared {} bytes; {} page(s) required ECC correction", image.size(), corrected);
+        fmt::println("Compared {} bytes; {} page(s) required ECC correction", totalBytes, corrected);
         return {};
     };
     mstar::Result<void> operation;
@@ -215,9 +261,18 @@ void addWriteCommands(CLI::App& app) {
     for (bool writing : {true, false}) {
         auto options = std::make_shared<Options>();
         auto* command = app.add_subcommand(writing ? "write" : "verify", writing ?
-            "Back up, erase, program and verify a block-aligned main-area NAND image" :
+            "Back up, erase, program and verify a NAND image or vendor config" :
             "Compare a page-aligned main-area image with flash using ECC-checked reads");
-        command->add_option("image", options->image, "Main-area image (no interleaved OOB)")->required();
+        auto* image = command->add_option("image", options->image, "Main-area image (no interleaved OOB)");
+        auto* offset = command->add_option("--offset", options->offset, "Main-area byte offset (decimal or 0x hex)")->default_val(0);
+        if (writing) {
+            auto* config = command->add_option("--config", options->config,
+                "Vendor filename : offset config; relative image paths use the config directory; pad tails with FF");
+            config->excludes(image);
+            config->excludes(offset);
+            command->add_flag("--preserve-gaps", options->preserveGaps,
+                "With --config, preserve main bytes after each image in its final erase block instead of filling FF")->needs(config);
+        } else image->required();
         command->add_option("--serial", options->serial, writing ?
             "Programmer serial shown by list (default: first detected programmer)" :
             "Programmer serial shown by list");
@@ -226,11 +281,16 @@ void addWriteCommands(CLI::App& app) {
             command->add_flag("--yes", options->yes, "Confirm erasing/programming the image range");
             command->add_flag("--dry-run", options->dryRun, "Check markers and save/verify the backup without erasing/programming");
         }
-        command->add_option("--offset", options->offset, "Main-area byte offset")->default_val(0);
         command->add_option("--i2c-address", options->address, "ISP I2C address")->default_val(0x49)->check(CLI::Range(0, 0x7F));
         command->add_option("--i2c-clock", options->clock, "I2C clock in Hz")->default_val(100000);
         command->add_flag("--trace-i2c", options->trace, "Trace I2C transactions to stderr");
         command->add_flag("--stay-in-isp", options->stay, "Omit ISP exit after restoring flash settings");
-        command->callback([options, writing] { std::exit(runImage(*options, writing)); });
+        command->callback([options, writing] {
+            if (writing && options->image.empty() && options->config.empty()) {
+                fmt::println(stderr, "Write requires an image or --config");
+                std::exit(1);
+            }
+            std::exit(runImage(*options, writing));
+        });
     }
 }

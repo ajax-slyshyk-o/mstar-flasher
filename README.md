@@ -173,6 +173,17 @@ Marked blocks abort the operation; image addresses are not shifted.
 `--serial` is optional for `write`, including `--dry-run`: when omitted, the
 first detected programmer is selected. Supply it to select a specific device.
 Each write/dry-run requires a new backup path and also creates `PATH.json`.
+To write several images, use the vendor `filename : offset` config format:
+
+```console
+./build/linux/mstar-cli write --config OnebinnandBurnImgConfig.cfg --backup before-config.raw --yes
+```
+
+Image paths are relative to the config directory. Config writes fill the rest
+of each image's last block with `0xFF`; add `--preserve-gaps` to retain those
+existing main-area bytes. Whole blocks between images stay untouched. All
+affected blocks are backed up before any erase. `--dry-run` is also supported.
+
 The backup includes spare/parity bytes and cannot be passed directly to `write`.
 Main-area programming regenerates ECC but does not preserve user OOB metadata.
 The implementation is offline-tested; no programming trial has been performed
