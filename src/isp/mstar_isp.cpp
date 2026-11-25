@@ -13,7 +13,19 @@ MstarIsp::MstarIsp(I2cMaster& i2c, uint8_t ispAddress)
     : i2c_(&i2c), ispAddress_(ispAddress) {}
 
 Result<void> MstarIsp::enter() {
-    return i2c_->write(ispAddress_, kActivationString);
+    auto result = i2c_->write(ispAddress_, kActivationString);
+    if (result || result.error().code != ErrorCode::I2cNack) return result;
+
+    // An already active ISP slave can NACK the activation string as an unknown
+    // command. Confirm its documented idle response instead of ignoring NACKs
+    // or retrying the string. This also permits reconnecting after --stay-in-isp.
+    const std::array<uint8_t, 1> command{static_cast<uint8_t>(MstarDdcCommand::Status)};
+    std::array<uint8_t, 1> status{};
+    auto check = i2c_->writeRead(ispAddress_, command, status);
+    if (check && status[0] == 0xC0) return {};
+    if (!check) result.error().message += "; ISP status check failed: " + check.error().message;
+    else result.error().message += "; ISP status did not confirm an active idle interface";
+    return result;
 }
 
 Result<void> MstarIsp::leave() {

@@ -1,6 +1,7 @@
 #include <array>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "mstar/isp/mstar_isp.hpp"
 #include "mock_i2c.hpp"
@@ -158,4 +159,32 @@ TEST_CASE("MstarIsp::transaction with empty rx skips the SPI read step", "[isp]"
     CHECK(i2c.transactions[0].tx == std::vector<uint8_t>{0x10, 0x06});
     CHECK(i2c.transactions[1].kind == TransactionKind::Write);
     CHECK(i2c.transactions[1].tx == std::vector<uint8_t>{0x12});
+}
+
+TEST_CASE("MstarIsp accepts an activation NACK only after confirming idle ISP status", "[isp]") {
+    const auto status = GENERATE(uint8_t{0xC0}, uint8_t{0x80}, uint8_t{0}, uint8_t{0xFF});
+    MockI2cMaster i2c;
+    MstarIsp isp(i2c, 0x4A);
+    i2c.failNextWrite = true;
+    i2c.queueResponse({status});
+    auto result = isp.enter();
+    CHECK(result.has_value() == (status == 0xC0));
+    if (!result) CHECK(result.error().code == ErrorCode::I2cNack);
+    REQUIRE(i2c.transactions.size() == 2);
+    CHECK(i2c.transactions[1].kind == TransactionKind::WriteRead);
+    CHECK(i2c.transactions[1].tx == std::vector<uint8_t>{0x20});
+    CHECK(i2c.transactions[1].address == 0x4A);
+    CHECK(i2c.writeCalls == 1); // no activation retry
+}
+
+TEST_CASE("MstarIsp preserves activation and status-transfer failures", "[isp]") {
+    MockI2cMaster i2c;
+    MstarIsp isp(i2c);
+    i2c.failNextWrite = true;
+    i2c.failNextWriteRead = true;
+    auto result = isp.enter();
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == ErrorCode::I2cNack);
+    CHECK(result.error().message == "mock write NACK; ISP status check failed: mock writeRead failure");
+    CHECK(i2c.transactions.size() == 2);
 }

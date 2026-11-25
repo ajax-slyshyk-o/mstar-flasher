@@ -30,6 +30,8 @@ public:
     );
 
     /// Sends the "MSTAR" activation string in a single I2C transaction.
+    /// If it is NACKed, accept an already active interface only after an
+    /// acknowledged status read returns idle (0xC0); never retry activation.
     Result<void> enter();
 
     /// Sends the reset/exit command.

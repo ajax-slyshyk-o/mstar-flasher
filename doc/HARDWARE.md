@@ -1,6 +1,30 @@
 # Hardware acceptance
 
-## Config-write investigation — 2026-11-25
+## Batched Windows transport validation - 2026-11-25
+
+After the vendor comparison, the Windows backend was changed to bounded
+D2XX transfers with sampled ACKs and GPIO settling intervals. The original tool
+was closed and the connected W25N02KV remained in ISP.
+
+- The bytewise baseline and two batched 8 KiB reads from offset zero match
+  byte-for-byte; all four pages reported clean ECC on each read.
+- Total command times: baseline 4.400 s; batched 1.764 s and 1.817 s, all at
+  100 kHz. This measures reads, not programming throughput.
+- Standalone verification of the saved baseline succeeded for all 8,192 bytes
+  with zero corrected pages. The target was left in ISP using `--stay-in-isp`.
+- The unused-address `0x7f` test now reports an address NACK. The old bytewise
+  executable falsely ACKed it on the same setup.
+- An already active ISP target NACKed the activation string but returned
+  acknowledged status `C0h`. Entry now accepts that exact status after an
+  activation NACK; other errors remain failures.
+
+See [VENDOR_PERFORMANCE.md](VENDOR_PERFORMANCE.md) for the command sequence,
+settling regression, hashes, artifacts and implementation limits.
+This session did not erase or program flash. Full-dump, physical programming,
+power-cycle/fresh-entry and logic-analyzer validation remain pending.
+The earlier records below describe previous transport behavior.
+
+## Config-write investigation вЂ” 2026-11-25
 
 The user's five-entry vendor config reached identification of **Winbond
 W25N02KV (`EF AA 22`)**, then failed at raw-read setup before any backup was
@@ -78,7 +102,7 @@ START/STOP/repeated-START behavior, reads at `49h`/`59h`, SERDB activation,
 MCU/UART control, and any register-setting or retry differences. Select a
 capture tool after checking the application's architecture and loaded DLLs.
 
-## Status — 2026-11-24
+## Status вЂ” 2026-11-24
 
 **Partial: USB setup and enumeration pass; target identification and complete
 dump acceptance do not pass.** No logic analyzer is connected, so waveform

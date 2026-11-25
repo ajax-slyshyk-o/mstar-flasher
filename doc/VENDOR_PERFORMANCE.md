@@ -163,3 +163,62 @@ up that pass as well; the performance evidence does not justify removing it.
 
 No production source or default clock changed during this investigation.
 
+## Implemented batching and bench validation
+
+The Windows backend now keeps LibMPSSE for channel initialization/lifetime and
+uses D2XX directly for transfers. Addresses are checked before data. Writes of
+up to 16 bytes retain per-byte ACK checks; longer writes check the first four
+bytes individually and submit the remaining payload in batches of at most
+1,024 bytes. Every sampled ACK is validated before another batch or the
+caller's NAND program-execute can be sent. A NACK cannot cancel bytes already
+submitted within the current batch.
+
+Reads use the same bounded batch size, with master ACKs across batch boundaries
+and a single final master NACK. The size is reduced at slow diagnostic clocks
+to limit wire time. Driver reads and writes have one-second timeouts; exact
+counts are required. NACKs receive STOP cleanup. A driver error or incomplete
+transfer invalidates the channel, attempts an out-of-band MPSSE reset, preserves
+the original error, and blocks later transfers until close/reopen. Payloads
+are never replayed.
+
+Hardware testing exposed two requirements hidden by bytewise USB round trips:
+
+- Immediate ACK sampling falsely acknowledged unused address `0x7f`, including
+  in the committed bytewise implementation. Twenty repeated GPIO writes let
+  released SDA settle before sampling ACK. Holding the last data bit as SCL
+  falls and settling after the master ACK also preserve byte boundaries.
+  Without read settling, the first batched prototype returned `EF 7F 7F ...`.
+  These holds are a tested FT2232D command sequence, not measured analog timing.
+- The already active target NACKs `MSTAR` as an unrecognized command while
+  acknowledging normal ISP commands. After an activation NACK, `enter()`
+  now requires an acknowledged `0x20` status transaction returning exactly
+  idle `0xC0`. Other status values and transfer failures still fail entry.
+  It does not ignore data NACKs or retry the activation string. The status
+  command is described in the [ISP protocol notes](https://linux-chenxing.org/isp/).
+
+The final negative control returns an address NACK at `0x7f`. At 100 kHz,
+four-page (8,192-byte) reads from offset zero took:
+
+| Transport | Total command time | Result |
+| --- | --- | --- |
+| Committed bytewise baseline | 4.400 s | 4 clean ECC pages |
+| Batched, first read | 1.764 s | Identical bytes; 4 clean ECC pages |
+| Batched, second read | 1.817 s | Identical bytes; 4 clean ECC pages |
+
+All three files have SHA-256
+`82cdf1e1fb8d319e42bbde6c4e2217b3457ea1df6849e15c6e2be2170315a52b`.
+The standalone `verify` command then compared all 8,192 bytes successfully,
+with zero corrected pages. Outputs are `build/batch-check-8192-*.bin`;
+timings are in `build/vendor-analysis/batch-read-results.json`.
+
+This is approximately 2.4x faster for the complete small read command, including
+initialization and ECC/control traffic. Hardware program throughput has not
+been measured; no erase/program was issued for this implementation's validation.
+The default remains 100 kHz. Mandatory write verification, NAND status checks,
+optional backups and OOB policy are unchanged.
+
+All four Windows CTest suites pass. The D2XX tests interpret the generated MPSSE
+stream and inject address/data NACKs, short/failed I/O, stale upper ACK bits,
+insufficient settling and cleanup failures. They check batching, repeated START,
+last-byte NACK, unusable-channel behavior and ISP cleanup. Existing NAND/CLI tests
+still reject failed program loads without execute/retry and detect verify mismatches.

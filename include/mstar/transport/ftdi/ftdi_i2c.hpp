@@ -11,7 +11,9 @@
 
 namespace mstar::ftdi {
 
-/// FT2232D-based I2C master: libftdi1 on Linux, D2XX + LibMPSSE elsewhere.
+/// FT2232D-based I2C master: libftdi1 on Linux, batched D2XX transfers with
+/// LibMPSSE initialization elsewhere. Every address/data ACK is checked;
+/// bulk writes detect a NACK after completing the current bounded batch.
 ///
 /// No FT_HANDLE, FT_STATUS or LibMPSSE type ever appears in this header -
 /// they are confined to the Impl defined in ftdi_i2c.cpp.

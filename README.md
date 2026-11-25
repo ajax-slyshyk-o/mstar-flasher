@@ -10,11 +10,13 @@ plan.
 ## Status
 
 Hardware-independent `mstar-core` library with ISP/SPI-NAND logic and offline
-unit tests. The FTDI backend uses D2XX + LibMPSSE on Windows and libftdi1/libusb
-on Linux. Offline tests pass and Linux USB access has been checked on an original
-FT2232C/D programmer. Target identification is still unreliable on the connected
-board; electrical timing and complete dumps remain unverified. See the
-[hardware acceptance record](doc/HARDWARE.md) for results and remaining checks.
+unit tests. On Windows, LibMPSSE initializes the FTDI channel and bounded D2XX
+batches carry data while checking every address/data ACK. Linux uses libftdi1/libusb.
+The Windows transport has passed matching 8 KiB reads and ECC-checked verification
+on a W25N02KV, plus an unused-address NACK check. Full dumps, physical programming,
+and logic-analyzer acceptance remain pending. See the
+[hardware acceptance record](doc/HARDWARE.md) and
+[transport performance investigation](doc/VENDOR_PERFORMANCE.md).
 
 ## Building
 

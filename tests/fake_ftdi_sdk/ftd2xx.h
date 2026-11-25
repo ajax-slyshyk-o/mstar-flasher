@@ -24,3 +24,10 @@ struct FT_DEVICE_LIST_INFO_NODE {
     char Description[64];
     FT_HANDLE ftHandle;
 };
+
+extern "C" {
+FT_STATUS FT_Write(FT_HANDLE handle, void* buffer, DWORD size, LPDWORD transferred);
+FT_STATUS FT_Read(FT_HANDLE handle, void* buffer, DWORD size, LPDWORD transferred);
+FT_STATUS FT_SetTimeouts(FT_HANDLE handle, DWORD readTimeout, DWORD writeTimeout);
+FT_STATUS FT_SetBitMode(FT_HANDLE handle, UCHAR mask, UCHAR mode);
+}
